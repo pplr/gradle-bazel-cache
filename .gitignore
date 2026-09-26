@@ -1,6 +1,12 @@
 # Gradle
 .gradle/
-build/
+# NOT a bare `build/`: that matches any directory of that name at any depth,
+# including src/main/proto/build/ where the vendored REAPI protos live. Ignoring
+# those meant CI had nothing to generate from while local builds kept working.
+/build/
+/*/build/
+/*/*/build/
+/*/*/*/build/
 !gradle/wrapper/gradle-wrapper.jar
 !gradle/wrapper/gradle-wrapper.properties
 

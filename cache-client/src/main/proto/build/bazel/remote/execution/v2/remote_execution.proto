@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Vendored SUBSET of the Bazel Remote Execution API v2.
+// Source: https://github.com/bazelbuild/remote-apis
+//         build/bazel/remote/execution/v2/remote_execution.proto
+// Copyright The Bazel Authors. Licensed under the Apache License, Version 2.0.
+//
+// ---------------------------------------------------------------------------
+// WHY A SUBSET
+//
+// A cache-only client needs five messages. The upstream file is ~2700 lines and
+// pulls in google/longrunning and google/api/annotations for the Execution
+// service, none of which we use.
+//
+// Protobuf wire compatibility depends only on the package name, field numbers
+// and field types -- NOT on a message declaring every field. Serializing this
+// subset produces bytes identical to what a full implementation would produce
+// for the same field values, and parsing tolerates (and preserves) the fields
+// we omit. Every field number below is transcribed verbatim from upstream.
+//
+// !! THIS FILE DEFINES THE CACHE KEYSPACE. !!
+// The digest of a serialized Action is the Action Cache key for every entry
+// this plugin writes. Changing a field number, a type, or which fields are
+// populated silently invalidates every entry on every server running this
+// plugin. Changes here require a keyVersion bump. See docs/PROTOCOL.md and the
+// golden vectors in CacheKeyMapperTest.
+// ---------------------------------------------------------------------------
+
+syntax = "proto3";
+
+package build.bazel.remote.execution.v2;
+
+option java_package = "build.bazel.remote.execution.v2";
+option java_multiple_files = true;
+option java_outer_classname = "RemoteExecutionProto";
+
+// A content digest. `hash` is the lowercase hex of the SHA-256 of the blob, and
+// `size_bytes` its exact length. Upstream field numbers: 1, 2.
+message Digest {
+  string hash = 1;
+  int64 size_bytes = 2;
+}
+
+// Upstream field numbers: path = 1, digest = 2, is_executable = 4.
+// (Upstream also has contents = 5 and node_properties = 7, which we never set:
+// the spec says clients SHOULD NOT populate `contents` when uploading.)
+message OutputFile {
+  string path = 1;
+  Digest digest = 2;
+  bool is_executable = 4;
+}
+
+// Upstream reserves field 1 and numbers output_files = 2, exit_code = 4.
+// We omit output_directories (3), stdout/stderr (5-8), execution_metadata (9)
+// and the symlink fields (10-12): unknown fields survive a parse untouched.
+message ActionResult {
+  reserved 1;
+  repeated OutputFile output_files = 2;
+  int32 exit_code = 4;
+}
+
+// Upstream field numbers: arguments = 1, output_paths = 7.
+message Command {
+  repeated string arguments = 1;
+  repeated string output_paths = 7;
+}
+
+// Upstream field numbers: command_digest = 1, input_root_digest = 2, salt = 9.
+// NOTE salt is 9, not 7 -- 3..5 and 8 are reserved upstream for fields that
+// moved to Command, and 6/7 are timeout/do_not_cache.
+message Action {
+  Digest command_digest = 1;
+  Digest input_root_digest = 2;
+  bytes salt = 9;
+}

@@ -122,6 +122,17 @@ tasks.withType<Sign>().configureEach {
     enabled = signingEnabled
 }
 
+// The staging repo is a plain directory, so publishing into it twice leaves
+// artifacts from both runs behind -- and a release would upload the stale
+// version alongside the new one.
+val cleanStagingRepo by tasks.registering(Delete::class) {
+    delete(layout.buildDirectory.dir("staging-repo"))
+}
+
+tasks.named("publishAllPublicationsToStagingRepository") {
+    dependsOn(cleanStagingRepo)
+}
+
 /** Bundles the staging repo for upload to the Sonatype Central Portal. */
 val centralBundle by tasks.registering(Zip::class) {
     group = "publishing"

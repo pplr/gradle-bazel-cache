@@ -1,5 +1,8 @@
 # gradle-bazel-cache
 
+[![CI](https://github.com/pplr/gradle-bazel-cache/actions/workflows/ci.yml/badge.svg)](https://github.com/pplr/gradle-bazel-cache/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Use a **standard Bazel remote cache server** as the backend for Gradle's build cache,
 so one cache serves both your Bazel and your Gradle builds.
 
@@ -92,7 +95,17 @@ Details in [docs/SERVER-MATRIX.md](docs/SERVER-MATRIX.md).
 ./gradlew build
 ```
 
-Requires a JDK 17+ (the build compiles to bytecode 17).
+Requires a JDK 17 or newer. No container needed: the tests that need a real
+cache server are tagged out of `build`. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for the other test layers.
+
+## Compatibility
+
+| | |
+|---|---|
+| Gradle | 8.0 and newer — each version in the matrix is exercised in CI |
+| Java | 17 and newer |
+| Configuration cache | supported |
 
 ## Documentation
 
