@@ -1,4 +1,4 @@
-# gradle-bazel-adapter
+# gradle-bazel-cache
 
 Use a **standard Bazel remote cache server** as the backend for Gradle's build cache,
 so one cache serves both your Bazel and your Gradle builds.

@@ -6,6 +6,12 @@ plugins {
 
 description = "Gradle settings plugin registering a Bazel remote cache as the Gradle build cache backend."
 
+// The Gradle module is :gradle-plugin, but the published coordinates must be
+// io.github.pplr:gradle-bazel-cache to match the repository and plugin id.
+base {
+    archivesName = "gradle-bazel-cache"
+}
+
 kotlin {
     compilerOptions {
         // Bytecode level. Enforced for Java by `options.release` below.
@@ -22,8 +28,8 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 gradlePlugin {
-    website = "https://github.com/pplr/gradle-bazel-adapter"
-    vcsUrl = "https://github.com/pplr/gradle-bazel-adapter.git"
+    website = "https://github.com/pplr/gradle-bazel-cache"
+    vcsUrl = "https://github.com/pplr/gradle-bazel-cache.git"
     plugins {
         create("bazelCache") {
             id = "io.github.pplr.bazel-cache"

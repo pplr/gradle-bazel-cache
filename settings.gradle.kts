@@ -12,7 +12,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "gradle-bazel-adapter"
+rootProject.name = "gradle-bazel-cache"
 
 include(":cache-client")
 include(":gradle-plugin")
