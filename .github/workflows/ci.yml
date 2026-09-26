@@ -132,3 +132,21 @@ jobs:
 
       - name: Vendored proto field numbers must match upstream
         run: ./tools/verify-proto-field-numbers.sh
+
+      - name: Sources needed to build must actually be tracked
+        run: |
+          # A bare `build/` in .gitignore once swallowed the vendored protos,
+          # whose package path contains a `build` directory. Local builds stayed
+          # green because the file existed on disk; CI failed every job.
+          MISSING=0
+          for f in $(find cache-client/src -name '*.proto'); do
+            git ls-files --error-unmatch "$f" >/dev/null 2>&1 || { echo "untracked: $f"; MISSING=1; }
+          done
+          [ "$MISSING" -eq 0 ] || { echo "::error::source files are untracked; check .gitignore"; exit 1; }
+          echo "all proto sources are tracked"
+
+          # Anything else git ignores but the build needs would show up here too.
+          UNTRACKED=$(git ls-files --others --exclude-standard --directory | grep -E '^(cache-client|gradle-plugin)/src/' || true)
+          if [ -n "$UNTRACKED" ]; then
+            echo "::error::untracked files under src/:"; echo "$UNTRACKED"; exit 1
+          fi
