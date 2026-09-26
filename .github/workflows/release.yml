@@ -74,7 +74,14 @@ jobs:
             *SNAPSHOT*) echo "::error::refusing to release a SNAPSHOT version ($VERSION)"; exit 1 ;;
           esac
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Releasing $VERSION"
+
+          # A hyphen is a semver prerelease identifier (1.0.0-beta, 1.0.0-rc.1).
+          # Without this the GitHub release shows as "Latest" on the repo front
+          # page, which misrepresents a beta as the current stable version.
+          case "$VERSION" in
+            *-*) echo "prerelease=true"  >> "$GITHUB_OUTPUT"; echo "Releasing $VERSION (prerelease)" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT"; echo "Releasing $VERSION" ;;
+          esac
 
       # A release must not be the first time the full suite runs.
       - name: Verify
@@ -174,4 +181,5 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
+            ${{ steps.version.outputs.prerelease == 'true' && '--prerelease' || '' }} \
             gradle-plugin/build/libs/gradle-bazel-cache-${{ steps.version.outputs.version }}.jar
