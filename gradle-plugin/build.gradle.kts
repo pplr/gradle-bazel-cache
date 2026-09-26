@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.shadow)
     `java-gradle-plugin`
 }
 
@@ -40,12 +41,58 @@ dependencies {
 
     testImplementation(kotlin("stdlib"))
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.junit.jupiter.params)
     testImplementation(libs.assertj.core)
     testImplementation(gradleTestKit())
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
+// --- Shading -----------------------------------------------------------------
+//
+// protobuf-java must not reach a consumer's classloader under its own name.
+// Gradle does not export com.google.protobuf to plugins, but every plugin in a
+// ClassLoaderScope shares ONE classloader, so a settings plugin competes with
+// Develocity, foojay-resolver and the AGP settings plugins for it. protobuf is
+// notoriously intolerant of generated-code/runtime version skew.
+//
+// We relocate com.google.protobuf ONLY.
+//
+// We deliberately do NOT relocate build.bazel.remote.execution.v2 (our own
+// generated stubs). Generated protobuf classes embed their FileDescriptorProto
+// as a string literal in which package names are length-prefixed varints.
+// Rewriting the package to a longer name changes the byte length without
+// updating the prefix, corrupting the descriptor pool at class-init time.
+// Relocating com.google.protobuf is a pure Java-package rename and touches no
+// descriptor string, because our protos import no well-known types.
+val shadedPrefix = "io.github.pplr.bazelcache.shaded"
+
+tasks.shadowJar {
+    archiveClassifier = ""
+    relocate("com.google.protobuf", "$shadedPrefix.protobuf")
+    mergeServiceFiles()
+    exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
+    exclude("module-info.class")
+    exclude("**/module-info.class")
+    // .proto sources are build-time inputs. protobuf-java ships its own copies
+    // of google/protobuf/*.proto, which would collide by resource name with any
+    // other plugin bundling protobuf. Descriptors are embedded in the generated
+    // classes, so nothing reads these at runtime.
+    exclude("**/*.proto")
+}
+
+// The plain jar would otherwise collide with the shaded one on the same name.
+tasks.jar {
+    archiveClassifier = "plain"
+}
+
+tasks.assemble {
+    dependsOn(tasks.shadowJar)
+}
+
 tasks.test {
+    dependsOn(tasks.shadowJar)
+    systemProperty("shadedJar", tasks.shadowJar.flatMap { it.archiveFile }.get().asFile.absolutePath)
+    systemProperty("shadedPrefix", shadedPrefix)
     useJUnitPlatform()
     testLogging {
         events("failed")
