@@ -62,3 +62,5 @@ varints. Renaming the package corrupts the descriptor pool at class-init time.
 
 CI runs the full matrix, including a real server. Conventional commits are not
 required; a message explaining *why* is.
+
+Releases go to the Gradle Plugin Portal; see [docs/RELEASING.md](docs/RELEASING.md).

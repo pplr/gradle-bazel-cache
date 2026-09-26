@@ -107,12 +107,19 @@ for the other test layers.
 | Java | 17 and newer |
 | Configuration cache | supported |
 
+## Availability
+
+Published to the [Gradle Plugin Portal](https://plugins.gradle.org), which
+`plugins { }` resolves from by default — no extra repository configuration.
+Maven Central is an optional mirror; see [docs/RELEASING.md](docs/RELEASING.md).
+
 ## Documentation
 
 - [How entries are stored](docs/PROTOCOL.md) — the Action Cache indirection, the
   key derivation, and why it is frozen
 - [Server compatibility](docs/SERVER-MATRIX.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Releasing](docs/RELEASING.md)
 
 ## Licence
 
