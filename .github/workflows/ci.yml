@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and unit tests (JDK ${{ matrix.java }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ['17', '21']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+      - uses: gradle/actions/setup-gradle@v4
+      # Integration and cross-version tests are tagged out of `build`, so this
+      # job needs no container and no network beyond dependency resolution.
+      - run: ./gradlew build --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-reports-jdk${{ matrix.java }}
+          path: '**/build/reports/tests/**'
+
+  integration:
+    name: Integration vs real bazel-remote
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Started as a step rather than a `services:` entry because bazel-remote
+      # needs command arguments, which services cannot supply. Pinned, never
+      # :latest -- cache behaviour is exactly what is under test.
+      - name: Start bazel-remote (AC validation ON, the default)
+        run: |
+          docker run -d --name bazel-remote \
+            -p 9090:8080 -p 9092:9092 \
+            -v bazel-remote-data:/data \
+            buchgr/bazel-remote-cache:v2.6.2 \
+            --dir /data --max_size 1
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:9090/status >/dev/null && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:9090/status
+
+      - name: Run protocol tests against the real server
+        env:
+          BAZEL_REMOTE_HTTP_URL: http://127.0.0.1:9090/
+        run: ./gradlew :cache-client:integrationTest --stacktrace
+
+      - name: Quickstart must reach FROM-CACHE
+        working-directory: examples/quickstart
+        run: |
+          ../../gradlew :app:compileJava --build-cache
+          rm -rf app/build .gradle
+          ../../gradlew :app:compileJava --build-cache | tee out.txt
+          # The whole point of the example. Fail loudly if it regresses.
+          grep -q 'FROM-CACHE' out.txt || { echo "::error::quickstart did not hit the cache"; exit 1; }
+
+      - name: Server logs
+        if: always()
+        run: docker logs bazel-remote 2>&1 | tail -30
+
+  cross-version:
+    name: Gradle ${{ matrix.gradle }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Sharded one version per job: each starts its own TestKit daemon, and
+      # running several in one JVM exhausts memory.
+      matrix:
+        gradle: ['8.0', '8.14.5', '9.8.0']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      # The only real enforcement of the supported-version claim: we compile
+      # against the wrapper's Gradle API, so nothing at compile time stops us
+      # using an API an older Gradle lacks.
+      - run: ./gradlew :gradle-plugin:crossVersionTest -PgradleVersions=${{ matrix.gradle }} --stacktrace
+
+  publishable:
+    name: Publication metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the Central bundle
+        run: ./gradlew :gradle-plugin:centralBundle --stacktrace
+
+      - name: The published POM must declare no dependencies
+        run: |
+          # protobuf is shaded into the jar. If it appears here, consumers would
+          # resolve it transitively and fight other plugins for the version.
+          POM=$(find gradle-plugin/build/staging-repo -name 'gradle-bazel-cache-*.pom' | head -1)
+          test -n "$POM" || { echo "::error::no implementation POM was produced"; exit 1; }
+          echo "checking $POM"
+          if grep -q '<dependencies>' "$POM"; then
+            echo "::error::published POM declares dependencies; they should be shaded"
+            sed -n '/<dependencies>/,/<\/dependencies>/p' "$POM"
+            exit 1
+          fi
+
+      - name: Vendored proto field numbers must match upstream
+        run: ./tools/verify-proto-field-numbers.sh

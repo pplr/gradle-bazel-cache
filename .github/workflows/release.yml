@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, without the leading v (e.g. 1.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    # Gate the secrets behind a GitHub environment so a release needs an
+    # explicit approval rather than happening on any tag push.
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          # Central rejects SNAPSHOT releases outright; fail here with a clear
+          # message rather than after a full build.
+          case "$VERSION" in
+            *SNAPSHOT*) echo "::error::refusing to release a SNAPSHOT version ($VERSION)"; exit 1 ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION"
+
+      # A release must not be the first time the full suite runs.
+      - name: Verify
+        run: ./gradlew build -Pversion=${{ steps.version.outputs.version }} --stacktrace
+
+      - name: Start bazel-remote
+        run: |
+          docker run -d --name bazel-remote -p 9090:8080 -v bazel-remote-data:/data \
+            buchgr/bazel-remote-cache:v2.6.2 --dir /data --max_size 1
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:9090/status >/dev/null && break; sleep 2; done
+
+      - name: Protocol tests against a real server
+        env:
+          BAZEL_REMOTE_HTTP_URL: http://127.0.0.1:9090/
+        run: ./gradlew :cache-client:integrationTest -Pversion=${{ steps.version.outputs.version }}
+
+      - name: Cross-version check
+        run: ./gradlew :gradle-plugin:crossVersionTest -Pversion=${{ steps.version.outputs.version }}
+
+      - name: Publish to the Gradle Plugin Portal
+        env:
+          GRADLE_PUBLISH_KEY: ${{ secrets.GRADLE_PUBLISH_KEY }}
+          GRADLE_PUBLISH_SECRET: ${{ secrets.GRADLE_PUBLISH_SECRET }}
+        run: ./gradlew publishPlugins -Pversion=${{ steps.version.outputs.version }} --stacktrace
+
+      - name: Build the signed Central bundle
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: ./gradlew :gradle-plugin:centralBundle -Pversion=${{ steps.version.outputs.version }} -Psigning.enabled=true --stacktrace
+
+      - name: Every artifact must be signed
+        run: |
+          # Central rejects a bundle with an unsigned artifact, but only after
+          # upload. Catch it here instead.
+          MISSING=0
+          while read -r f; do
+            case "$f" in *.asc|*.md5|*.sha1|*.sha256|*.sha512|*maven-metadata.xml) continue ;; esac
+            [ -f "$f.asc" ] || { echo "unsigned: $f"; MISSING=1; }
+          done < <(find gradle-plugin/build/staging-repo -type f)
+          [ "$MISSING" -eq 0 ] || { echo "::error::unsigned artifacts in the bundle"; exit 1; }
+          echo "all artifacts signed"
+
+      - name: Upload to the Sonatype Central Portal
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+        run: |
+          TOKEN=$(printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" | base64 -w0)
+          HTTP=$(curl -sS -o upload.out -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -F "bundle=@gradle-plugin/build/central/central-bundle.zip" \
+            "https://central.sonatype.com/api/v1/publisher/upload?name=gradle-bazel-cache-${{ steps.version.outputs.version }}")
+          echo "HTTP $HTTP"; cat upload.out; echo
+          case "$HTTP" in
+            2*) echo "uploaded; the deployment still needs releasing in the Central UI unless auto-publish is on" ;;
+            *)  echo "::error::Central upload failed with HTTP $HTTP"; exit 1 ;;
+          esac
+
+      - name: GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            gradle-plugin/build/libs/gradle-bazel-cache-${{ steps.version.outputs.version }}.jar

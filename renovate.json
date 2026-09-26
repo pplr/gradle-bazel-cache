@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "bazel-remote pins the behaviour the integration suite asserts, so review those bumps deliberately rather than automerging them.",
+      "matchPackageNames": ["buchgr/bazel-remote-cache"],
+      "automerge": false,
+      "labels": ["dependencies", "needs-integration-review"]
+    },
+    {
+      "description": "protobuf is shaded into the published jar; a bump changes what consumers receive.",
+      "matchPackageNames": ["com.google.protobuf:{/,}**"],
+      "automerge": false
+    },
+    {
+      "description": "Gradle versions in the cross-version matrix are compatibility claims, not dependencies.",
+      "matchFileNames": [".github/workflows/ci.yml"],
+      "enabled": false
+    }
+  ]
+}
