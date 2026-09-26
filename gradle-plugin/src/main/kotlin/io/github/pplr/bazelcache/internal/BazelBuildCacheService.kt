@@ -1,5 +1,7 @@
 package io.github.pplr.bazelcache.internal
 
+import io.github.pplr.bazelcache.client.CacheDisabledException
+import io.github.pplr.bazelcache.client.CacheIoException
 import io.github.pplr.bazelcache.client.CacheKeyMapper
 import io.github.pplr.bazelcache.client.RemoteCacheClient
 import org.gradle.api.logging.Logging
@@ -86,6 +88,12 @@ internal class BazelBuildCacheService(
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
             false
+        } catch (e: CacheDisabledException) {
+            // The breaker already decided; counting thousands of these as
+            // errors would bury the one cause worth reporting.
+            stats.skipped.incrementAndGet()
+            stats.disabledReason = e.reason
+            false
         } catch (e: Throwable) {
             if (Thread.currentThread().isInterrupted) return false
             fail("load", key, e)
@@ -123,6 +131,19 @@ internal class BazelBuildCacheService(
             }
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
+        } catch (e: CacheDisabledException) {
+            stats.skipped.incrementAndGet()
+            stats.disabledReason = e.reason
+        } catch (e: CacheIoException) {
+            if (Thread.currentThread().isInterrupted) return
+            if (e.payloadTooLarge) {
+                // The server refused the size. One oversized entry must not
+                // cost caching for the rest of the build.
+                stats.skipped.incrementAndGet()
+                logger.info("bazel-cache: server refused {} as too large", key.hashCode)
+            } else {
+                fail("store", key, e)
+            }
         } catch (e: Throwable) {
             if (Thread.currentThread().isInterrupted) return
             fail("store", key, e)

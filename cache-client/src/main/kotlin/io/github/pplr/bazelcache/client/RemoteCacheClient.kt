@@ -55,6 +55,15 @@ interface RemoteCacheClient : Closeable {
     fun probe(): Boolean
 }
 
+/**
+ * Thrown when the circuit breaker has given up on the cache.
+ *
+ * Distinct from [CacheIoException] so callers can tell "we deliberately skipped
+ * this" from "this failed": the former is expected once a cache is known to be
+ * down, and counting thousands of them as errors would bury the real cause.
+ */
+class CacheDisabledException(val reason: String) : RuntimeException("cache disabled: $reason")
+
 /** A transport fault. Never used to signal a cache miss. */
 class CacheIoException(
     message: String,

@@ -3,6 +3,7 @@ package io.github.pplr.bazelcache
 import io.github.pplr.bazelcache.client.CacheEndpoint
 import io.github.pplr.bazelcache.client.CacheKeyMapper
 import io.github.pplr.bazelcache.client.http.HttpRemoteCacheClient
+import io.github.pplr.bazelcache.client.resilience.ResilientRemoteCacheClient
 import io.github.pplr.bazelcache.internal.BazelBuildCacheService
 import io.github.pplr.bazelcache.internal.NoOpBuildCacheService
 import io.github.pplr.bazelcache.internal.describeEndpoint
@@ -68,7 +69,9 @@ class BazelRemoteBuildCacheServiceFactory : BuildCacheServiceFactory<BazelRemote
         }
 
         return BazelBuildCacheService(
-            client = client,
+            // Gradle never retries and disables the cache on first failure, so
+            // recovery has to happen below its notice.
+            client = ResilientRemoteCacheClient(client),
             mapper = CacheKeyMapper(configuration.keyVersion),
             spoolDirectory = spool,
             maxEntrySizeBytes = configuration.maxEntrySizeBytes,
