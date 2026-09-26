@@ -19,6 +19,10 @@ out/
 .DS_Store
 Thumbs.db
 
+# Reference material for the talk this project is based on (transcript and
+# slides). Third-party conference material -- kept locally, never redistributed.
+conf/
+
 # Local overrides / secrets
 local.properties
 *.local
