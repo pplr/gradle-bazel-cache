@@ -50,6 +50,7 @@ dependencies {
     testImplementation(libs.junit.jupiter.params)
     testImplementation(libs.assertj.core)
     testImplementation(gradleTestKit())
+    testImplementation(testFixtures(project(":cache-client")))
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 

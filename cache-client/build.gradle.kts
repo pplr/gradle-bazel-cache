@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.protobuf)
     `java-library`
+    `java-test-fixtures`
 }
 
 description = "Bazel remote cache (REAPI v2) client. No Gradle API dependency."
@@ -38,6 +39,8 @@ dependencies {
 
     // Shaded into the plugin jar; see gradle-plugin/build.gradle.kts.
     api(libs.protobuf.java)
+
+    testFixturesCompileOnly(kotlin("stdlib"))
 
     testImplementation(kotlin("stdlib"))
     testImplementation(libs.junit.jupiter)

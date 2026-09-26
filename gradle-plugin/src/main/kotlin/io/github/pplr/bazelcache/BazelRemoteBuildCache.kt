@@ -44,6 +44,21 @@ abstract class BazelRemoteBuildCache : AbstractBuildCache() {
     var verifyDownloads: Boolean = true
 
     /**
+     * Where entries are spooled while their digest is computed.
+     *
+     * Defaults to the JVM temp directory. Worth overriding in CI, where
+     * `java.io.tmpdir` is often a small tmpfs that a few hundred megabytes of
+     * build outputs will fill.
+     */
+    var spoolDirectory: String? = null
+
+    /** Entries at or below this size are spooled in memory rather than to disk. */
+    var inMemoryLimitBytes: Long = 8L * 1024 * 1024
+
+    /** Extra request headers, as header name -> environment variable NAME. */
+    var headersFromEnvironment: Map<String, String> = emptyMap()
+
+    /**
      * When true, cache faults are rethrown as `BuildCacheException` instead of
      * being absorbed. Off by default: Gradle disables the remote cache for the
      * whole build on the first failure it sees.
