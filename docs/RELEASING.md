@@ -46,6 +46,20 @@ real cost, and the reason the Central mirror is opt-in rather than assumed.
 Secrets live on the `release` GitHub environment, so a release needs an explicit
 approval rather than firing on any tag push.
 
+## Rehearse first
+
+A published Plugin Portal version **cannot be withdrawn**, so the release path
+is rehearsable. Run it from the Actions tab:
+
+> Actions → Release → Run workflow → version `1.0.0`, **Dry run: checked**
+
+A rehearsal runs every check and validates the publication against the Portal
+(`publishPlugins --validate-only`), but publishes nothing, uploads nothing and
+creates no GitHub release. Dry run defaults to **on**, so an accidental dispatch
+cannot publish.
+
+A tag push always publishes.
+
 ## Cutting a release
 
 1. Make sure `main` is green. The release workflow re-runs everything, but a
@@ -55,13 +69,20 @@ approval rather than firing on any tag push.
    git tag -s v1.0.0 -m "1.0.0"
    git push origin v1.0.0
    ```
-3. Approve the `release` environment when GitHub asks.
+3. Approve the `release` environment when GitHub asks. The environment requires
+   a reviewer, so nothing publishes until a human approves the run.
 
 The workflow derives the version from the tag, so nothing in the repository
 needs editing. It refuses to publish a `SNAPSHOT`.
 
 `workflow_dispatch` takes an explicit version, for a re-run after a failed
 publish.
+
+## Approval gate
+
+The `release` environment has required reviewers. A tag push starts the workflow
+but it pauses before any publishing step until approved, which is also the last
+chance to cancel a release triggered by an accidental tag.
 
 ## What the workflow checks before publishing
 
