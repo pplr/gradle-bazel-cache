@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.protobuf)
     `java-library`
 }
 
@@ -24,13 +25,23 @@ tasks.withType<JavaCompile>().configureEach {
     options.release = 17
 }
 
+protobuf {
+    protoc {
+        artifact = libs.protobuf.protoc.get().toString()
+    }
+}
+
 dependencies {
     // Deliberately compileOnly: Gradle provides the Kotlin stdlib to plugin
     // classloaders, and bundling a second copy is a classpath hazard.
     compileOnly(kotlin("stdlib"))
 
+    // Shaded into the plugin jar; see gradle-plugin/build.gradle.kts.
+    api(libs.protobuf.java)
+
     testImplementation(kotlin("stdlib"))
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.junit.jupiter.params)
     testImplementation(libs.assertj.core)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
