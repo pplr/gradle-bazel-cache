@@ -24,6 +24,9 @@ class FakeBazelCacheServer : Closeable {
     val getCount = AtomicInteger()
     val putCount = AtomicInteger()
 
+    /** Uploads refused for lacking Content-Length, as bazel-remote would. */
+    val chunkedUploadsRejected = AtomicInteger()
+
     /** When set, every request returns this status instead of being served. */
     @Volatile var forceStatus: Int? = null
 
@@ -75,6 +78,14 @@ class FakeBazelCacheServer : Closeable {
                 }
                 "PUT" -> {
                     putCount.incrementAndGet()
+                    // Match bazel-remote: it requires Content-Length and answers
+                    // 400 to a chunked upload. Accepting chunked here once hid a
+                    // real bug for an entire milestone.
+                    if (exchange.requestHeaders.getFirst("Content-Length") == null) {
+                        chunkedUploadsRejected.incrementAndGet()
+                        respond(exchange, 400, ByteArray(0))
+                        return
+                    }
                     store[key] = exchange.requestBody.use { it.readBytes() }
                     respond(exchange, 200, ByteArray(0))
                 }
@@ -98,7 +109,7 @@ class FakeBazelCacheServer : Closeable {
     fun reset() {
         ac.clear(); cas.clear()
         forceStatus = null; failFirst = 0; truncateCasTo = null; delayMillis = 0
-        requestCount.set(0); getCount.set(0); putCount.set(0)
+        requestCount.set(0); getCount.set(0); putCount.set(0); chunkedUploadsRejected.set(0)
     }
 
     override fun close() = server.stop(0)

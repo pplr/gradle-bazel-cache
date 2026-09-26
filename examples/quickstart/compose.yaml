@@ -1,0 +1,30 @@
+# A local Bazel remote cache for the quickstart.
+#
+#   podman compose up -d      (or: docker compose up -d)
+#
+# Works unchanged with Docker. A named volume is used rather than a bind mount
+# because rootless Podman maps UIDs, and a host directory ends up unwritable by
+# the container user.
+services:
+  bazel-remote:
+    # Pinned, never :latest -- cache behaviour is exactly what we are testing.
+    image: docker.io/buchgr/bazel-remote-cache:v2.6.2
+    container_name: bazel-remote-quickstart
+    command:
+      - --dir=/data
+      - --max_size=1            # GiB, and required by bazel-remote
+      # AC validation is left ON (the default): this plugin is designed to work
+      # against an unmodified server, and the quickstart should prove that.
+    ports:
+      - "9090:8080"             # HTTP cache protocol: /ac/ and /cas/
+      - "9092:9092"             # gRPC REAPI, for Bazel clients (plugin 1.1)
+    volumes:
+      - bazel-remote-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  bazel-remote-data:

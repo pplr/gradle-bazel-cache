@@ -96,10 +96,28 @@ class HttpRemoteCacheClient(
     override fun writeBlob(digest: Digest, source: () -> InputStream) {
         val uri = endpoint.contentAddressableStorage(digest.hash)
         val response = send(
-            put(uri, HttpRequest.BodyPublishers.ofInputStream(source), OCTET_STREAM_CONTENT_TYPE),
+            // Must carry Content-Length. A plain ofInputStream publisher reports
+            // an unknown length, which makes the JDK send Transfer-Encoding:
+            // chunked -- and bazel-remote answers 400, as Bazel's own HTTP cache
+            // client documents ("does not support transfer encoding chunked").
+            // We always know the size: it is part of the digest.
+            put(uri, knownLength(source, digest.sizeBytes), OCTET_STREAM_CONTENT_TYPE),
             HttpResponse.BodyHandlers.discarding(),
         )
         if (!isSuccess(response.statusCode())) throw failure("PUT", uri, response.statusCode())
+    }
+
+    /**
+     * Streams [source] while advertising [length], so the request is sent with
+     * Content-Length instead of chunked encoding.
+     */
+    private fun knownLength(source: () -> InputStream, length: Long): HttpRequest.BodyPublisher {
+        val delegate = HttpRequest.BodyPublishers.ofInputStream(source)
+        return object : HttpRequest.BodyPublisher {
+            override fun contentLength(): Long = length
+            override fun subscribe(subscriber: java.util.concurrent.Flow.Subscriber<in java.nio.ByteBuffer>) =
+                delegate.subscribe(subscriber)
+        }
     }
 
     override fun probe(): Boolean {

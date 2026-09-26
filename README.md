@@ -34,6 +34,18 @@ No open-source Gradle build-cache backend speaks REAPI. This project is that mis
 
 For a working reference in another ecosystem, see Mill's `BazelRemoteCache.scala`.
 
+## Try it in two minutes
+
+```bash
+cd examples/quickstart
+podman compose up -d                              # or docker compose up -d
+../../gradlew :app:compileJava --build-cache      # cold: stores
+rm -rf app/build .gradle
+../../gradlew :app:compileJava --build-cache      # warm: FROM-CACHE
+```
+
+See [examples/quickstart](examples/quickstart/README.md).
+
 ## Usage
 
 ```kotlin
@@ -61,9 +73,13 @@ tokenEnvironmentVariable = "BAZEL_CACHE_TOKEN"   // default
 
 | Server | 1.0 (HTTP) | 1.1 (gRPC) |
 |---|---|---|
-| `bazel-remote` | ✅ | ✅ |
-| nginx + WebDAV, S3 / GCS / MinIO, Artifactory | ✅ | — |
-| Buildbarn, BuildBuddy, NativeLink, EngFlow | ❌ gRPC-only | ✅ |
+| `bazel-remote` | ✅ verified against v2.6.2 | planned |
+| nginx + WebDAV, S3 / GCS / MinIO, Artifactory | expected, untested | — |
+| Buildbarn, BuildBuddy, NativeLink, EngFlow | ❌ gRPC-only | planned |
+
+Verified means the integration suite runs against a real server with **AC
+validation enabled** — its default. No server flags are required.
+Details in [docs/SERVER-MATRIX.md](docs/SERVER-MATRIX.md).
 
 ## Roadmap
 
@@ -77,6 +93,13 @@ tokenEnvironmentVariable = "BAZEL_CACHE_TOKEN"   // default
 ```
 
 Requires a JDK 17+ (the build compiles to bytecode 17).
+
+## Documentation
+
+- [How entries are stored](docs/PROTOCOL.md) — the Action Cache indirection, the
+  key derivation, and why it is frozen
+- [Server compatibility](docs/SERVER-MATRIX.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
 
 ## Licence
 
