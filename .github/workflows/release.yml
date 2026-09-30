@@ -106,6 +106,25 @@ jobs:
       # The Plugin Portal is independent of Sonatype and is what
       # `plugins { id(...) version "..." }` resolves from by default. It is the
       # only publish a release requires.
+      # A re-run of a finished release must not publish again. The Portal
+      # accepted a second publish of 1.0.0-beta from a re-run; it was harmless
+      # only because the build is reproducible. Detect it and skip instead.
+      - name: Is this version already on the Plugin Portal?
+        id: portal
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          URL="https://plugins.gradle.org/m2/io/github/pplr/bazel-cache/io.github.pplr.bazel-cache.gradle.plugin/$V/io.github.pplr.bazel-cache.gradle.plugin-$V.pom"
+          # Exactly 200, redirects not followed: for anything it does not host,
+          # the Portal answers 303 See Other pointing at Maven Central, which
+          # `curl -f` would count as success.
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -I "$URL")
+          if [ "$CODE" = "200" ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$V is already on the Plugin Portal; the publish step will be skipped."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Validate the Portal publication (rehearsal)
         if: steps.mode.outputs.publish != 'true'
         env:
@@ -116,7 +135,7 @@ jobs:
           -Pversion=${{ steps.version.outputs.version }} --stacktrace
 
       - name: Publish to the Gradle Plugin Portal
-        if: steps.mode.outputs.publish == 'true'
+        if: steps.mode.outputs.publish == 'true' && steps.portal.outputs.published != 'true'
         env:
           GRADLE_PUBLISH_KEY: ${{ secrets.GRADLE_PUBLISH_KEY }}
           GRADLE_PUBLISH_SECRET: ${{ secrets.GRADLE_PUBLISH_SECRET }}
@@ -178,8 +197,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            ${{ steps.version.outputs.prerelease == 'true' && '--prerelease' || '' }} \
-            gradle-plugin/build/libs/gradle-bazel-cache-${{ steps.version.outputs.version }}.jar
+          JAR="gradle-plugin/build/libs/gradle-bazel-cache-${{ steps.version.outputs.version }}.jar"
+          PRERELEASE="${{ steps.version.outputs.prerelease }}"
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            # A re-run: the release exists. Refresh the asset instead of failing.
+            gh release upload "${GITHUB_REF_NAME}" "$JAR" --clobber
+            gh release edit "${GITHUB_REF_NAME}" --prerelease="$PRERELEASE"
+            echo "::notice::Release ${GITHUB_REF_NAME} already existed; asset refreshed."
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes \
+              --prerelease="$PRERELEASE" \
+              "$JAR"
+          fi

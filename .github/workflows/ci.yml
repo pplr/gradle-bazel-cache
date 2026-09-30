@@ -22,12 +22,12 @@ jobs:
       matrix:
         java: ['17', '21']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       # Integration and cross-version tests are tagged out of `build`, so this
       # job needs no container and no network beyond dependency resolution.
       - run: ./gradlew build --stacktrace
@@ -41,12 +41,12 @@ jobs:
     name: Integration vs real bazel-remote
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       # Started as a step rather than a `services:` entry because bazel-remote
       # needs command arguments, which services cannot supply. Pinned, never
@@ -92,12 +92,12 @@ jobs:
       matrix:
         gradle: ['8.0', '8.14.5', '9.8.0']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       # The only real enforcement of the supported-version claim: we compile
       # against the wrapper's Gradle API, so nothing at compile time stops us
       # using an API an older Gradle lacks.
@@ -107,12 +107,12 @@ jobs:
     name: Publication metadata
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       - name: Build the Central bundle
         run: ./gradlew :gradle-plugin:centralBundle --stacktrace
