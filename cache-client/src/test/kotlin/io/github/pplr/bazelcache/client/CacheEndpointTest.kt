@@ -12,23 +12,22 @@ class CacheEndpointTest {
 
     private val hash = "a".repeat(64)
 
-    @ParameterizedTest(name = "[{index}] base={0} instance={1}")
+    @ParameterizedTest(name = "[{index}] endpoint={0}")
     @CsvSource(
-        // base url,                       instance,  expected ac url
-        "http://h:8080,                    '',        http://h:8080/ac/",
-        "http://h:8080/,                   '',        http://h:8080/ac/",
-        "http://h:8080/cache,              '',        http://h:8080/cache/ac/",
-        "http://h:8080/cache/,             '',        http://h:8080/cache/ac/",
-        "http://h:8080,                    team-a,    http://h:8080/team-a/ac/",
-        "http://h:8080/,                   /team-a/,  http://h:8080/team-a/ac/",
-        "http://h:8080/cache/,             team-a,    http://h:8080/cache/team-a/ac/",
+        // endpoint,                  expected ac prefix
+        "http://h:8080,               http://h:8080/ac/",
+        "http://h:8080/,              http://h:8080/ac/",
+        "http://h:8080/cache,         http://h:8080/cache/ac/",
+        "http://h:8080/cache/,        http://h:8080/cache/ac/",
+        "http://h:8080/org/team-a/,   http://h:8080/org/team-a/ac/",
     )
-    fun `builds urls without doubled or missing slashes`(base: String, instance: String, expectedPrefix: String) {
-        // A doubled slash is a 400 from bazel-remote, not a 404, so it would look
-        // like a protocol bug rather than a cache miss.
-        val endpoint = CacheEndpoint(base, instance)
-        assertThat(endpoint.actionCache(hash).toString()).isEqualTo(expectedPrefix + hash)
-        assertThat(endpoint.contentAddressableStorage(hash).toString())
+    fun `the endpoint path is the only prefix, as in Bazel`(endpoint: String, expectedPrefix: String) {
+        // Bazel's HTTP client builds <--remote_cache path>/ac|cas/<hash> and never
+        // uses --remote_instance_name. A doubled slash would be a 400 from
+        // bazel-remote rather than a 404, so it would not look like a cache miss.
+        val e = CacheEndpoint(endpoint)
+        assertThat(e.actionCache(hash).toString()).isEqualTo(expectedPrefix + hash)
+        assertThat(e.contentAddressableStorage(hash).toString())
             .isEqualTo(expectedPrefix.replace("/ac/", "/cas/") + hash)
     }
 

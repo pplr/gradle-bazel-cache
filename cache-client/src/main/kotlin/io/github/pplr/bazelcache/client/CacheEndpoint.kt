@@ -7,8 +7,9 @@ import java.net.URI
  *
  * The protocol is defined by Bazel's own `HttpCacheClient`: action cache blobs
  * live at `<base>/ac/<hash>` and CAS blobs at `<base>/cas/<hash>`, where `<hash>`
- * is base16. There is no protocol-level instance name -- any prefix is simply
- * part of the base URL, which is how `bazel --remote_cache=<url>` works too.
+ * is base16. There is no protocol-level instance name: the only prefix is the
+ * endpoint's own path, exactly as Bazel's HTTP client uses the path of
+ * `--remote_cache` and ignores `--remote_instance_name`.
  *
  * bazel-remote matches the result against a strict path regex requiring an
  * optional prefix, then `ac/` or `cas/`, then exactly 64 lowercase hex
@@ -16,7 +17,7 @@ import java.net.URI
  * not a 404 -- and that distinction matters: 400 means we built a bad URL,
  * 404 means a cache miss.
  */
-class CacheEndpoint(baseUrl: String, instanceName: String = "") {
+class CacheEndpoint(baseUrl: String) {
 
     private val base: URI
 
@@ -33,13 +34,10 @@ class CacheEndpoint(baseUrl: String, instanceName: String = "") {
         }
         require(!parsed.host.isNullOrBlank()) { "endpoint must include a host: $baseUrl" }
 
-        // Normalise base + instance into a single prefix with exactly one
-        // trailing slash, so joining never produces "//" (which bazel-remote
-        // runs through path.Clean and may reject).
+        // Normalise the endpoint path to exactly one trailing slash, so joining
+        // never produces "//" (which bazel-remote runs through path.Clean).
         val basePath = parsed.path.orEmpty().trim('/')
-        val instance = instanceName.trim('/')
-        val segments = listOf(basePath, instance).filter { it.isNotEmpty() }
-        val path = if (segments.isEmpty()) "/" else "/" + segments.joinToString("/") + "/"
+        val path = if (basePath.isEmpty()) "/" else "/$basePath/"
 
         base = URI(parsed.scheme, parsed.userInfo, parsed.host, parsed.port, path, null, null)
     }

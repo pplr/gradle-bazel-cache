@@ -46,7 +46,6 @@ class BazelRemoteBuildCacheServiceFactory : BuildCacheServiceFactory<BazelRemote
                 requireNotNull(configuration.endpoint) {
                     "bazel-cache: 'endpoint' is required, e.g. endpoint = \"https://cache.example.com\""
                 },
-                configuration.instanceName,
             )
         } catch (e: IllegalArgumentException) {
             throw InvalidUserDataException("bazel-cache: ${e.message}", e)

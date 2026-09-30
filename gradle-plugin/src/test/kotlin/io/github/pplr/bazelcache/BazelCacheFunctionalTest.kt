@@ -131,6 +131,21 @@ class BazelCacheFunctionalTest {
     }
 
     @Test
+    fun `instanceName has no effect over HTTP, as in Bazel`() {
+        // Bazel's HTTP cache client never uses --remote_instance_name. We match
+        // that exactly, but warn instead of dropping a configured value silently.
+        writeProject(instanceName = "team-a")
+
+        val result = build()
+        assertThat(result.task(":cacheMe")!!.outcome).isEqualTo(TaskOutcome.SUCCESS)
+        assertThat(result.output).containsOnlyOnce("instanceName has no effect over HTTP")
+        assertThat(server.requestPaths)
+            .describedAs("no request may carry the instance name as a path prefix")
+            .isNotEmpty()
+            .noneMatch { it.contains("team-a") }
+    }
+
+    @Test
     fun `push disabled means nothing is stored`() {
         writeProject(push = false)
         build()
@@ -156,7 +171,7 @@ class BazelCacheFunctionalTest {
 
     private fun outputFile() = File(projectDir, "build/out.txt")
 
-    private fun writeProject(endpoint: String = server.baseUrl, push: Boolean = true) {
+    private fun writeProject(endpoint: String = server.baseUrl, push: Boolean = true, instanceName: String = "") {
         File(projectDir, "settings.gradle.kts").writeText(
             """
             import io.github.pplr.bazelcache.BazelRemoteBuildCache
@@ -172,6 +187,7 @@ class BazelCacheFunctionalTest {
                 remote(BazelRemoteBuildCache::class) {
                     endpoint = "$endpoint"
                     isPush = $push
+                    instanceName = "$instanceName"
                 }
             }
             """.trimIndent(),

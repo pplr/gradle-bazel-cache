@@ -29,5 +29,9 @@ buildCache {
         // Credentials, when a server needs them, are referenced by environment
         // variable NAME so the value never lands in the configuration cache:
         // tokenEnvironmentVariable = "BAZEL_CACHE_TOKEN"
+        //
+        // A path prefix goes in the endpoint, exactly as with Bazel's
+        // --remote_cache; instanceName (like --remote_instance_name) has no
+        // effect over HTTP.
     }
 }
