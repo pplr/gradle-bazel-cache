@@ -24,7 +24,7 @@ jobs:
     # approval rather than happening on any tag push.
     environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
