@@ -29,7 +29,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       # A published Plugin Portal version cannot be withdrawn, so the release
       # path is rehearsable. A tag push always publishes; a manual dispatch
