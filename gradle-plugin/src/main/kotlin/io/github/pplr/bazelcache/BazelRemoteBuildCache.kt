@@ -20,8 +20,13 @@ abstract class BazelRemoteBuildCache : AbstractBuildCache() {
     var endpoint: String? = null
 
     /**
-     * Optional path prefix / REAPI instance name. Applied as a URL path segment
-     * before `ac/` and `cas/`. Note bazel-remote ignores it for `/cas/`.
+     * Same meaning as Bazel's `--remote_instance_name`: a value passed verbatim as
+     * `instance_name` in the Remote Execution API, whose meaning the server decides.
+     *
+     * Like Bazel, it has **no effect over HTTP**: Bazel's HTTP cache client never
+     * uses it. For an HTTP path prefix, put it in [endpoint], as Bazel users put it
+     * in `--remote_cache` (e.g. `https://cache.example.com/team-a/`). It is sent
+     * once the gRPC transport lands.
      */
     var instanceName: String = ""
 

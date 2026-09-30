@@ -24,6 +24,9 @@ class FakeBazelCacheServer : Closeable {
     val getCount = AtomicInteger()
     val putCount = AtomicInteger()
 
+    /** Every request path seen, in order. */
+    val requestPaths: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
+
     /** Uploads refused for lacking Content-Length, as bazel-remote would. */
     val chunkedUploadsRejected = AtomicInteger()
 
@@ -49,6 +52,7 @@ class FakeBazelCacheServer : Closeable {
 
     private fun handle(exchange: HttpExchange) {
         requestCount.incrementAndGet()
+        requestPaths += exchange.requestURI.path
         try {
             if (delayMillis > 0) Thread.sleep(delayMillis)
 
@@ -110,6 +114,7 @@ class FakeBazelCacheServer : Closeable {
         ac.clear(); cas.clear()
         forceStatus = null; failFirst = 0; truncateCasTo = null; delayMillis = 0
         requestCount.set(0); getCount.set(0); putCount.set(0); chunkedUploadsRejected.set(0)
+        requestPaths.clear()
     }
 
     override fun close() = server.stop(0)

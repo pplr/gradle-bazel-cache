@@ -56,8 +56,15 @@ round trip.
 **`--disable_http_ac_validation`** — not required. The plugin is designed for an
 unmodified server, and the integration suite runs against the validating default.
 
-**`--enable_ac_key_instance_mangling`** — hashes the instance name into AC keys.
-Harmless, provided every client sends the same `instanceName`.
+**Instance names and path prefixes** — the plugin treats `instanceName` exactly as
+Bazel treats `--remote_instance_name`: it is ignored over HTTP, and will be sent as the
+REAPI `instance_name` field once the gRPC transport lands. Over HTTP the only prefix is
+the endpoint's own path.
+
+A path prefix does **not** isolate entries on a default bazel-remote: it parses the
+prefix and discards it, so `/team-a/ac/X` and `/team-b/ac/X` are the same entry. Only
+`--enable_ac_key_instance_mangling` changes that, and then for the Action Cache only.
+Use separate servers, or separate `keyVersion` values, if you need hard isolation.
 
 **Eviction** — hit rate is governed by *CAS* eviction, not AC eviction: an entry
 is only usable while the blob it names survives. A cache sized for Bazel

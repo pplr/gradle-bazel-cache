@@ -65,6 +65,10 @@ buildCache {
 }
 ```
 
+`instanceName` has the same meaning as Bazel's `--remote_instance_name`, and — like
+Bazel — no effect over HTTP. For an HTTP path prefix, put it in the endpoint, as you
+would in Bazel's `--remote_cache`: `endpoint = "https://cache.example.com/team-a/"`.
+
 Credentials are referenced **by environment variable name**, never by value, so no secret
 is written into Gradle's configuration cache entry on disk:
 

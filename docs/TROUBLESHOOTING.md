@@ -56,6 +56,19 @@ That is the empty blob, which every REAPI server reports as present. Expect
 `401`/`403` count as reachable — the server answered. A credential problem is
 reported separately and with a clearer message.
 
+## `instanceName has no effect over HTTP (as in Bazel)`
+
+Expected, and matches Bazel: its HTTP cache client ignores `--remote_instance_name`
+too. The value is kept for the gRPC transport. If you meant a path prefix, move it
+into the endpoint:
+
+```kotlin
+endpoint = "https://cache.example.com/team-a/"
+```
+
+Upgrading from 1.0.0-beta: that release inserted `instanceName` into HTTP URLs. Moving
+the prefix into `endpoint` reproduces the old URLs exactly.
+
 ## Everything is a miss
 
 **Different Gradle versions produce different cache keys.** The key includes the
