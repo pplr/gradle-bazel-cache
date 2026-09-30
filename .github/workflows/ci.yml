@@ -31,7 +31,7 @@ jobs:
       # Integration and cross-version tests are tagged out of `build`, so this
       # job needs no container and no network beyond dependency resolution.
       - run: ./gradlew build --stacktrace
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: test-reports-jdk${{ matrix.java }}
