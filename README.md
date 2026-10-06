@@ -55,7 +55,7 @@ See [examples/quickstart](examples/quickstart/README.md).
 // settings.gradle.kts — pluginManagement must be the first block
 pluginManagement { repositories { gradlePluginPortal() } }
 
-plugins { id("io.github.pplr.bazel-cache") version "<unreleased>" }
+plugins { id("io.github.pplr.bazel-cache") version "1.0.0" }
 
 buildCache {
     remote(BazelRemoteBuildCache::class) {
