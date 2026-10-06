@@ -6,8 +6,6 @@
 Use a **standard Bazel remote cache server** as the backend for Gradle's build cache,
 so one cache serves both your Bazel and your Gradle builds.
 
-> **Status: early development.** Not yet published. See [Roadmap](#roadmap).
-
 ## Why this exists
 
 Gradle's built-in `HttpBuildCache` **cannot talk to a Bazel remote cache**, even though
