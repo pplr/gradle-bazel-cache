@@ -1,5 +1,6 @@
 package io.github.pplr.bazelcache
 
+import io.github.pplr.bazelcache.client.grpc.FakeGrpcCacheServer
 import io.github.pplr.bazelcache.client.http.FakeBazelCacheServer
 import org.assertj.core.api.Assertions.assertThat
 import org.gradle.testkit.runner.GradleRunner
@@ -32,6 +33,7 @@ class BazelCacheFunctionalTest {
     @BeforeEach
     fun setUp() {
         server.reset()
+        grpcServer.reset()
         salt = UUID.randomUUID().toString()
     }
 
@@ -152,6 +154,101 @@ class BazelCacheFunctionalTest {
         assertThat(server.putCount.get()).isZero()
     }
 
+    // --- gRPC ---------------------------------------------------------------
+
+    @Test
+    fun `second build is served from the remote cache over gRPC`() {
+        writeProject(endpoint = grpcServer.target)
+
+        val first = build()
+        assertThat(first.task(":cacheMe")!!.outcome).isEqualTo(TaskOutcome.SUCCESS)
+        // Greater than one: Gradle also caches the build scripts' compilation.
+        assertThat(grpcServer.count("UpdateActionResult")).describedAs("first build should store").isGreaterThan(0)
+
+        clearBuildState()
+
+        val second = build()
+        assertThat(second.output).contains("Configuration cache entry reused")
+        assertThat(second.task(":cacheMe")!!.outcome).isEqualTo(TaskOutcome.FROM_CACHE)
+        assertThat(outputFile().readText()).isEqualTo("produced-$salt")
+    }
+
+    @Test
+    fun `instanceName is sent over gRPC, as in Bazel, without a warning`() {
+        writeProject(endpoint = grpcServer.target, instanceName = "team-a")
+
+        val result = build()
+        assertThat(result.task(":cacheMe")!!.outcome).isEqualTo(TaskOutcome.SUCCESS)
+        assertThat(result.output).doesNotContain("instanceName has no effect")
+        assertThat(grpcServer.instanceNames).isNotEmpty().containsOnly("team-a")
+    }
+
+    @Test
+    fun `the auth token is sent as gRPC metadata and never reaches the configuration cache entry`() {
+        writeProject(endpoint = grpcServer.target)
+        val secret = "super-secret-token-${UUID.randomUUID()}"
+
+        GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withPluginClasspath()
+            .withEnvironment(System.getenv() + mapOf("BAZEL_CACHE_TOKEN" to secret))
+            .withArguments("cacheMe", "--build-cache", "--configuration-cache")
+            .forwardOutput()
+            .build()
+
+        assertThat(grpcServer.headers).isNotEmpty().allMatch { it["authorization"] == "Bearer $secret" }
+        val offenders = File(projectDir, ".gradle/configuration-cache").walkTopDown()
+            .filter { it.isFile }
+            .filter { it.readBytes().toString(Charsets.ISO_8859_1).contains(secret) }
+            .toList()
+        assertThat(offenders).describedAs("token found in configuration cache entry").isEmpty()
+    }
+
+    @Test
+    fun `an unreachable gRPC cache degrades instead of failing the build`() {
+        writeProject(endpoint = "grpc://127.0.0.1:1")
+
+        val result = build()
+        assertThat(result.task(":cacheMe")!!.outcome).isEqualTo(TaskOutcome.SUCCESS)
+        assertThat(result.output).contains("is not reachable")
+    }
+
+    @Test
+    fun `a gRPC server without SHA256 is not used`() {
+        // Bazel refuses such a server too; here it degrades instead of failing.
+        writeProject(endpoint = grpcServer.target)
+        grpcServer.digestFunctions = emptyList()
+
+        val result = build()
+        assertThat(result.task(":cacheMe")!!.outcome).isEqualTo(TaskOutcome.SUCCESS)
+        assertThat(result.output).contains("does not support SHA256")
+        assertThat(grpcServer.count("Write")).isZero()
+    }
+
+    @Test
+    fun `a gRPC server refusing action results only earns Bazel's warning`() {
+        writeProject(endpoint = grpcServer.target)
+        grpcServer.updateEnabled = false
+
+        val result = build()
+        assertThat(result.task(":cacheMe")!!.outcome).isEqualTo(TaskOutcome.SUCCESS)
+        // Not containsOnlyOnce: Gradle runs the service factory twice when it
+        // stores a configuration cache entry.
+        assertThat(result.output).contains("does not support uploading action results")
+    }
+
+    @Test
+    fun `a gRPC endpoint with a path is a configuration error`() {
+        writeProject(endpoint = "grpc://127.0.0.1:9092/team-a")
+
+        val result = GradleRunner.create()
+            .withProjectDir(projectDir)
+            .withPluginClasspath()
+            .withArguments("cacheMe", "--build-cache", "--configuration-cache")
+            .buildAndFail()
+        assertThat(result.output).contains("a gRPC endpoint cannot have a path; use instanceName instead")
+    }
+
     // --- fixture ------------------------------------------------------------
 
     private fun build() = GradleRunner.create()
@@ -216,7 +313,11 @@ class BazelCacheFunctionalTest {
 
     companion object {
         private val server = FakeBazelCacheServer()
+        private val grpcServer = FakeGrpcCacheServer()
 
-        @JvmStatic @AfterAll fun stop() = server.close()
+        @JvmStatic @AfterAll fun stop() {
+            server.close()
+            grpcServer.close()
+        }
     }
 }

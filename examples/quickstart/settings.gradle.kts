@@ -30,8 +30,9 @@ buildCache {
         // variable NAME so the value never lands in the configuration cache:
         // tokenEnvironmentVariable = "BAZEL_CACHE_TOKEN"
         //
-        // A path prefix goes in the endpoint, exactly as with Bazel's
-        // --remote_cache; instanceName (like --remote_instance_name) has no
-        // effect over HTTP.
+        // The scheme picks the transport, as with Bazel's --remote_cache:
+        // http(s):// for the HTTP protocol, grpc(s):// for gRPC (port 9092 here).
+        // Over HTTP a path prefix goes in the endpoint; instanceName (like
+        // --remote_instance_name) is sent over gRPC and has no effect over HTTP.
     }
 }

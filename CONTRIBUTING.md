@@ -16,14 +16,15 @@ resolution: the tests that need a real server are tagged out of `build`.
 | Command | What it proves |
 |---|---|
 | `./gradlew build` | Unit and functional tests, including an in-process fake cache server. |
-| `./gradlew :cache-client:integrationTest` | The protocol, against a **real** bazel-remote. Needs `BAZEL_REMOTE_HTTP_URL`. |
+| `./gradlew :cache-client:integrationTest` | The protocol, against a **real** bazel-remote. Needs `BAZEL_REMOTE_HTTP_URL` and/or `BAZEL_REMOTE_GRPC_URL`. |
 | `./gradlew :gradle-plugin:crossVersionTest` | The plugin loads and caches on every supported Gradle version. |
 
 Running the integration suite:
 
 ```bash
 cd examples/quickstart && podman compose up -d && cd -
-BAZEL_REMOTE_HTTP_URL=http://127.0.0.1:9090/ ./gradlew :cache-client:integrationTest
+BAZEL_REMOTE_HTTP_URL=http://127.0.0.1:9090/ BAZEL_REMOTE_GRPC_URL=grpc://127.0.0.1:9092 \
+  ./gradlew :cache-client:integrationTest
 ```
 
 **A fake that is kinder than the real server certifies bugs.** Our fake once
@@ -45,10 +46,11 @@ remote cache for the whole build on the first failure it sees. A cache fault mus
 never fail or degrade a build beyond the entry it concerns.
 
 **Adding a dependency.** The plugin shares one classloader with every other
-settings plugin in a consumer's build. protobuf is shaded for exactly this
-reason. New dependencies need a strong justification and relocation.
+settings plugin in a consumer's build. protobuf and the gRPC stack are shaded for
+exactly this reason. New dependencies need a strong justification and relocation,
+and `ShadedJarContentTest` must still pass a gRPC round trip out of the shaded jar.
 
-**Relocating `build.bazel.remote.*`.** Generated protobuf classes embed their
+**Relocating `build.bazel.remote.*` or `com.google.bytestream`.** Generated protobuf classes embed their
 descriptor as a string literal in which package names are length-prefixed
 varints. Renaming the package corrupts the descriptor pool at class-init time.
 `ShadedJarContentTest` guards this.

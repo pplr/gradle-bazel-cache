@@ -16,17 +16,26 @@ import org.gradle.caching.configuration.AbstractBuildCache
  */
 abstract class BazelRemoteBuildCache : AbstractBuildCache() {
 
-    /** Base URL of the cache server, e.g. `https://cache.internal:8080`. */
+    /**
+     * The cache server, spelled as Bazel's `--remote_cache`:
+     *
+     * - `http://` / `https://` -- Bazel's HTTP cache protocol, e.g. `https://cache.internal:8080`;
+     * - `grpc://` / `grpcs://` -- the Remote Execution API over gRPC, plaintext or TLS,
+     *   e.g. `grpcs://cache.internal:1985`;
+     * - no scheme at all -- gRPC over TLS, as in Bazel.
+     */
     var endpoint: String? = null
 
     /**
      * Same meaning as Bazel's `--remote_instance_name`: a value passed verbatim as
      * `instance_name` in the Remote Execution API, whose meaning the server decides.
      *
+     * Over gRPC it is sent on every request and prefixes every ByteStream resource
+     * name, exactly as Bazel sends it.
+     *
      * Like Bazel, it has **no effect over HTTP**: Bazel's HTTP cache client never
      * uses it. For an HTTP path prefix, put it in [endpoint], as Bazel users put it
-     * in `--remote_cache` (e.g. `https://cache.example.com/team-a/`). It is sent
-     * once the gRPC transport lands.
+     * in `--remote_cache` (e.g. `https://cache.example.com/team-a/`).
      */
     var instanceName: String = ""
 
@@ -60,7 +69,10 @@ abstract class BazelRemoteBuildCache : AbstractBuildCache() {
     /** Entries at or below this size are spooled in memory rather than to disk. */
     var inMemoryLimitBytes: Long = 8L * 1024 * 1024
 
-    /** Extra request headers, as header name -> environment variable NAME. */
+    /**
+     * Extra request headers, as header name -> environment variable NAME. Over
+     * gRPC they are sent as call metadata, like Bazel's `--remote_header`.
+     */
     var headersFromEnvironment: Map<String, String> = emptyMap()
 
     /**

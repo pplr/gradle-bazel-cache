@@ -55,6 +55,33 @@ publishes a pointer to a blob that is not there, which reads as a permanent miss
 
 Step 1 is a pure function, so a cache miss costs exactly one request.
 
+### Over gRPC
+
+The same entries, through the Remote Execution API instead of `/ac/` and `/cas/`.
+The calls follow Bazel's `GrpcCacheClient`; every request carries the configured
+`instance_name` and `digest_function = SHA256`.
+
+```
+startup:  Capabilities.GetCapabilities           the reachability probe; SHA256 must be listed
+
+store:    ContentAddressableStorage.FindMissingBlobs  {entry, Command, Action}, once
+          ByteStream.Write  {instance}/uploads/{uuid}/blobs/{hash}/{size}   each missing blob
+          ActionCache.UpdateActionResult         an ActionResult naming the entry blob
+
+load:     ActionCache.GetActionResult            NOT_FOUND -> clean miss
+          ByteStream.Read   {instance}/blobs/{hash}/{size}                  NOT_FOUND -> clean miss
+```
+
+`{instance}/` is omitted entirely when `instanceName` is empty, as Bazel omits it.
+Writes are sent in 16 KiB chunks under gRPC flow control; a server may end a
+write early when it already holds the blob, and `ALREADY_EXISTS` is a success.
+The CAS-before-AC rule above applies unchanged.
+
+The Action Cache key, the `Action`, the `Command` and the `ActionResult` are
+byte-for-byte the ones described below, whichever transport wrote them: an entry
+stored over HTTP loads over gRPC and the reverse. The integration suite checks
+this against a real server.
+
 ## Deriving the Action Cache key
 
 Rather than hashing the Gradle key into an opaque digest, we synthesise a
@@ -138,5 +165,6 @@ The correct response is to revert, or to bump `keyVersion` and add a new vector
 beside the old one. `keyVersion` is the supported escape hatch, and bumping it is
 a full cache flush.
 
-Field numbers in the vendored proto subset are verified against upstream by
-`tools/verify-proto-field-numbers.sh`.
+Field numbers in the vendored proto subset — including the gRPC request and
+ByteStream messages, which are not part of the keyspace — are verified against
+upstream by `tools/verify-proto-field-numbers.sh`.

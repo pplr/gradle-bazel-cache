@@ -40,6 +40,19 @@ class ResilientRemoteCacheClient(
     override fun readBlob(digest: Digest, sink: OutputStream): Boolean =
         call("readBlob", digest.sizeBytes) { delegate.readBlob(digest, sink) } ?: false
 
+    override val queriesMissingBlobs: Boolean get() = delegate.queriesMissingBlobs
+
+    /**
+     * A local answer (HTTP) bypasses the breaker: counting it as a success
+     * would reset the consecutive-failure count before every store.
+     */
+    override fun findMissingBlobs(digests: Collection<Digest>): Set<Digest> =
+        if (!delegate.queriesMissingBlobs) {
+            delegate.findMissingBlobs(digests)
+        } else {
+            call("findMissingBlobs", 0) { delegate.findMissingBlobs(digests) } ?: digests.toSet()
+        }
+
     override fun writeBlob(digest: Digest, source: () -> InputStream) {
         call("writeBlob", digest.sizeBytes) { delegate.writeBlob(digest, source) }
     }

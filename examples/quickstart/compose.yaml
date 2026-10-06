@@ -17,7 +17,7 @@ services:
       # against an unmodified server, and the quickstart should prove that.
     ports:
       - "9090:8080"             # HTTP cache protocol: /ac/ and /cas/
-      - "9092:9092"             # gRPC REAPI, for Bazel clients (plugin 1.1)
+      - "9092:9092"             # gRPC REAPI: grpc://127.0.0.1:9092
     volumes:
       - bazel-remote-data:/data
     healthcheck:

@@ -39,13 +39,23 @@ dependencies {
 
     // Shaded into the plugin jar; see gradle-plugin/build.gradle.kts.
     api(libs.protobuf.java)
+    // gRPC transport. okhttp rather than netty: a fraction of the size, and no
+    // native transports to fight other plugins over. Also shaded.
+    implementation(libs.grpc.okhttp) {
+        // okio is Kotlin and drags in its own stdlib; Gradle supplies one.
+        exclude(group = "org.jetbrains.kotlin")
+    }
+    implementation(libs.grpc.stub)
 
     testFixturesCompileOnly(kotlin("stdlib"))
+    testFixturesImplementation(libs.grpc.okhttp) { exclude(group = "org.jetbrains.kotlin") }
+    testFixturesImplementation(libs.grpc.stub)
 
     testImplementation(kotlin("stdlib"))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.junit.jupiter.params)
     testImplementation(libs.assertj.core)
+    testImplementation(libs.grpc.okhttp) { exclude(group = "org.jetbrains.kotlin") }
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
@@ -66,15 +76,19 @@ tasks.test {
  *   podman run -d -p 9090:8080 -v bazel-remote-data:/data \
  *     docker.io/buchgr/bazel-remote-cache:v2.6.2 --dir /data --max_size 1
  *   BAZEL_REMOTE_HTTP_URL=http://127.0.0.1:9090/ ./gradlew integrationTest
+ *
+ * Add `-p 9092:9092` and BAZEL_REMOTE_GRPC_URL=grpc://127.0.0.1:9092 to run the
+ * gRPC suite as well.
  */
 val integrationTest by tasks.registering(Test::class) {
     group = "verification"
-    description = "Runs cache protocol tests against a real bazel-remote server."
+    description = "Runs cache protocol tests against a real bazel-remote server, over HTTP and gRPC."
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
     useJUnitPlatform { includeTags("integration") }
     // The server URL is an input, so results must not be cached across servers.
     inputs.property("bazelRemoteUrl", providers.environmentVariable("BAZEL_REMOTE_HTTP_URL").orElse("unset"))
+    inputs.property("bazelRemoteGrpcUrl", providers.environmentVariable("BAZEL_REMOTE_GRPC_URL").orElse("unset"))
     outputs.upToDateWhen { false }
     testLogging {
         events("passed", "failed")

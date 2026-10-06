@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 // WHY A SUBSET
 //
-// A cache-only client needs five messages. The upstream file is ~2700 lines and
+// A cache-only client needs a handful of messages. The upstream file is ~2700 lines and
 // pulls in google/longrunning and google/api/annotations for the Execution
 // service, none of which we use.
 //
@@ -17,6 +17,10 @@
 // subset produces bytes identical to what a full implementation would produce
 // for the same field values, and parsing tolerates (and preserves) the fields
 // we omit. Every field number below is transcribed verbatim from upstream.
+//
+// Services are deliberately not declared: the gRPC client builds its method
+// descriptors by hand (see ReapiMethods.kt), so no gRPC codegen -- and no
+// grpc-protobuf runtime -- is needed.
 //
 // !! THIS FILE DEFINES THE CACHE KEYSPACE. !!
 // The digest of a serialized Action is the Action Cache key for every entry
@@ -72,4 +76,73 @@ message Action {
   Digest command_digest = 1;
   Digest input_root_digest = 2;
   bytes salt = 9;
+}
+
+// ---------------------------------------------------------------------------
+// gRPC request/response messages. These are transport envelopes only: nothing
+// below takes part in the cache keyspace.
+// ---------------------------------------------------------------------------
+
+// Upstream numbers SHA256 = 1. Only SHA256 is ever sent: it is the one function
+// the HTTP protocol and our keyspace use.
+message DigestFunction {
+  enum Value {
+    UNKNOWN = 0;
+    SHA256 = 1;
+  }
+}
+
+// Upstream field numbers: instance_name = 1, action_digest = 2,
+// inline_stdout = 3, inline_stderr = 4, digest_function = 6.
+// (inline_output_files = 5 is omitted: we never inline.)
+message GetActionResultRequest {
+  string instance_name = 1;
+  Digest action_digest = 2;
+  bool inline_stdout = 3;
+  bool inline_stderr = 4;
+  DigestFunction.Value digest_function = 6;
+}
+
+// Upstream field numbers: instance_name = 1, action_digest = 2,
+// action_result = 3, digest_function = 5. (results_cache_policy = 4 omitted.)
+message UpdateActionResultRequest {
+  string instance_name = 1;
+  Digest action_digest = 2;
+  ActionResult action_result = 3;
+  DigestFunction.Value digest_function = 5;
+}
+
+// Upstream field numbers: instance_name = 1, blob_digests = 2, digest_function = 3.
+message FindMissingBlobsRequest {
+  string instance_name = 1;
+  repeated Digest blob_digests = 2;
+  DigestFunction.Value digest_function = 3;
+}
+
+// Upstream field number: missing_blob_digests = 2 (there is no field 1).
+message FindMissingBlobsResponse {
+  repeated Digest missing_blob_digests = 2;
+}
+
+// Upstream field number: instance_name = 1.
+message GetCapabilitiesRequest {
+  string instance_name = 1;
+}
+
+// Upstream field number: cache_capabilities = 1. Execution capabilities and
+// API versions (2-5) are omitted; they survive a parse as unknown fields.
+message ServerCapabilities {
+  CacheCapabilities cache_capabilities = 1;
+}
+
+// Upstream field numbers: digest_functions = 1,
+// action_cache_update_capabilities = 2.
+message CacheCapabilities {
+  repeated DigestFunction.Value digest_functions = 1;
+  ActionCacheUpdateCapabilities action_cache_update_capabilities = 2;
+}
+
+// Upstream field number: update_enabled = 1.
+message ActionCacheUpdateCapabilities {
+  bool update_enabled = 1;
 }

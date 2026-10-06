@@ -153,6 +153,7 @@ dependencies {
     testImplementation(libs.assertj.core)
     testImplementation(gradleTestKit())
     testImplementation(testFixtures(project(":cache-client")))
+    testImplementation(libs.grpc.stub)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
@@ -164,21 +165,51 @@ dependencies {
 // Develocity, foojay-resolver and the AGP settings plugins for it. protobuf is
 // notoriously intolerant of generated-code/runtime version skew.
 //
-// We relocate com.google.protobuf ONLY.
+// The gRPC transport brings more of the same hazard -- grpc-java, Guava, gson,
+// okio, perfmark -- each a library another plugin may carry at another version,
+// so all of them are relocated too. Annotation-only jars are dropped: nothing
+// reads them at runtime.
 //
-// We deliberately do NOT relocate build.bazel.remote.execution.v2 (our own
-// generated stubs). Generated protobuf classes embed their FileDescriptorProto
+// We deliberately do NOT relocate build.bazel.remote.execution.v2 or
+// com.google.bytestream (our own generated stubs). Generated protobuf classes embed their FileDescriptorProto
 // as a string literal in which package names are length-prefixed varints.
 // Rewriting the package to a longer name changes the byte length without
 // updating the prefix, corrupting the descriptor pool at class-init time.
 // Relocating com.google.protobuf is a pure Java-package rename and touches no
-// descriptor string, because our protos import no well-known types.
+// descriptor string, because our protos import no well-known types. That is
+// also why the gRPC method descriptors are hand-written rather than generated:
+// grpc-protobuf would bring the well-known types back.
+//
+// Each relocation names a precise package. A broad one such as "com.google"
+// would sweep com.google.bytestream up with the rest.
 val shadedPrefix = "io.github.pplr.bazelcache.shaded"
 
 tasks.shadowJar {
     archiveClassifier = ""
     relocate("com.google.protobuf", "$shadedPrefix.protobuf")
+    relocate("io.grpc", "$shadedPrefix.grpc")
+    relocate("com.google.common", "$shadedPrefix.guava")
+    relocate("com.google.thirdparty", "$shadedPrefix.guava.thirdparty")
+    relocate("com.google.gson", "$shadedPrefix.gson")
+    relocate("okio", "$shadedPrefix.okio")
+    relocate("io.perfmark", "$shadedPrefix.perfmark")
+    dependencies {
+        // Annotation-only: compile-time metadata that nothing reads at runtime.
+        exclude(dependency("com.google.code.findbugs:jsr305"))
+        exclude(dependency("com.google.errorprone:error_prone_annotations"))
+        exclude(dependency("com.google.j2objc:j2objc-annotations"))
+        exclude(dependency("com.google.android:annotations"))
+        exclude(dependency("org.codehaus.mojo:animal-sniffer-annotations"))
+        exclude(dependency("org.jspecify:jspecify"))
+        exclude(dependency("com.google.guava:listenablefuture"))
+    }
     mergeServiceFiles()
+    // Shadow drops duplicate paths before the merger sees them, so without this
+    // grpc-core's io.grpc.LoadBalancerProvider (pick_first) loses to grpc-util's,
+    // and every call fails with "Could not find policy 'pick_first'".
+    filesMatching("META-INF/services/**") {
+        duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    }
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
     exclude("module-info.class")
     exclude("**/module-info.class")
@@ -187,6 +218,11 @@ tasks.shadowJar {
     // other plugin bundling protobuf. Descriptors are embedded in the generated
     // classes, so nothing reads these at runtime.
     exclude("**/*.proto")
+    // The bundled libraries' Maven coordinates and ProGuard rules describe them
+    // under their original packages. Left in, a scanner would report Guava or
+    // gson as present on the consumer's classpath when only relocated copies are.
+    exclude("META-INF/maven/**")
+    exclude("META-INF/proguard/**")
 }
 
 // The plain jar would otherwise collide with the shaded one on the same name.

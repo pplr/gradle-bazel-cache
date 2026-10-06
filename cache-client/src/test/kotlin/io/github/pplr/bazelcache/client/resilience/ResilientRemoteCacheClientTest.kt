@@ -118,6 +118,32 @@ class ResilientRemoteCacheClientTest {
     }
 
     @Test
+    fun `findMissingBlobs is retried like any other call`() {
+        val delegate = RecordingRemoteCacheClient { if (it < 2) retryable() else null }
+        assertThat(resilient(delegate).findMissingBlobs(listOf(small))).containsExactly(small)
+        assertThat(delegate.attempts.get()).isEqualTo(2)
+    }
+
+    @Test
+    fun `a local findMissingBlobs answer does not hide consecutive failures`() {
+        // Over HTTP the answer never touches the network. Were it counted as a
+        // success, every store would reset the count and the breaker would
+        // never open on a dead server.
+        val clock = FakeClock()
+        val breaker = CircuitBreaker(consecutiveFailureThreshold = 2, clock = clock)
+        val delegate = RecordingRemoteCacheClient(queriesMissingBlobs = false) {
+            CacheIoException("down", retryable = false)
+        }
+        val client = resilient(delegate, clock, breaker = breaker)
+
+        repeat(2) {
+            assertThat(client.findMissingBlobs(listOf(small))).containsExactly(small)
+            runCatching { client.writeBlob(small) { ByteArray(0).inputStream() } }
+        }
+        assertThat(breaker.currentState()).isEqualTo(CircuitBreaker.State.OPEN)
+    }
+
+    @Test
     fun `auth failure trips the breaker immediately`() {
         // Retrying a rejected credential across thousands of tasks is the worst
         // possible behaviour, and waiting will not fix it.

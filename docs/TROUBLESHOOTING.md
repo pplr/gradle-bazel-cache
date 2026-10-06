@@ -47,20 +47,47 @@ curl -v http://your-cache:8080/cas/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b9
 That is the empty blob, which every REAPI server reports as present. Expect
 `200`. Then check, in order:
 
-- The endpoint includes a **scheme**: `https://cache.example.com`, not `cache.example.com`.
+- The **scheme matches the server.** As with Bazel's `--remote_cache`, `http://`
+  and `https://` speak the HTTP cache protocol, `grpc://` and `grpcs://` speak
+  gRPC, and an endpoint with **no scheme is gRPC over TLS** — so
+  `cache.example.com:8080` will not reach an HTTP cache.
 - The port is the **cache** port. For BuildBuddy, `:8080` is the web UI and the
-  cache is gRPC on `:1985` — which 1.0 cannot use.
-- The server is HTTP-capable at all. **Buildbarn and BuildBuddy are gRPC-only**
-  (see [SERVER-MATRIX.md](SERVER-MATRIX.md)).
+  cache is gRPC on `:1985`. For bazel-remote, HTTP is `:8080` and gRPC `:9092`.
+- The transport is one the server offers. **Buildbarn and BuildBuddy are
+  gRPC-only** (see [SERVER-MATRIX.md](SERVER-MATRIX.md)).
 
-`401`/`403` count as reachable — the server answered. A credential problem is
-reported separately and with a clearer message.
+`401`/`403` — or `UNAUTHENTICATED`/`PERMISSION_DENIED` over gRPC — count as
+reachable: the server answered. A credential problem is reported separately and
+with a clearer message.
+
+Over gRPC the probe is `GetCapabilities`, as in Bazel. To reproduce it by hand:
+
+```bash
+grpcurl -plaintext your-cache:9092 build.bazel.remote.execution.v2.Capabilities/GetCapabilities
+```
+
+(`grpcurl` needs server reflection or the `.proto` files; drop `-plaintext` for
+`grpcs://`.)
+
+## `... does not support SHA256 ...`
+
+The gRPC server's `GetCapabilities` does not list SHA-256, the only digest
+function this plugin (and its HTTP protocol) uses. Bazel refuses such a server
+too. The build runs without the remote cache; reconfigure the server, or point
+at an instance that uses SHA-256.
+
+## `push is enabled, but the remote cache does not support uploading action results ...`
+
+Bazel's warning, for the same condition: the gRPC server says this client may
+not write the Action Cache — commonly a read-only API key. Reads still work.
+Like Bazel, the plugin keeps trying to store; expect those stores to fail and the
+circuit breaker to stop them. Set `isPush = false` for read-only credentials.
 
 ## `instanceName has no effect over HTTP (as in Bazel)`
 
 Expected, and matches Bazel: its HTTP cache client ignores `--remote_instance_name`
-too. The value is kept for the gRPC transport. If you meant a path prefix, move it
-into the endpoint:
+too. Over gRPC the value is sent. If you meant a path prefix, move it into the
+endpoint:
 
 ```kotlin
 endpoint = "https://cache.example.com/team-a/"
@@ -92,6 +119,16 @@ That prints `Build cache key for task ':app:compileJava' is <32 hex>`. The same
 inputs must produce the same key on both machines; if they do not, the cause is
 in the task's inputs, not in the cache backend.
 
+## `a gRPC endpoint cannot have a path; use instanceName instead`
+
+A gRPC target is only `host:port`, as in Bazel. What a path would mean over HTTP
+is the instance name over gRPC:
+
+```kotlin
+endpoint = "grpcs://cache.example.com:1985"
+instanceName = "team-a"
+```
+
 ## HTTP 400 on every store
 
 The server is rejecting the request rather than the content. Two known causes:
@@ -109,8 +146,9 @@ bazel-cache: ... 12 skipped
 ```
 
 Either the entry exceeded `maxEntrySizeBytes` (default 256 MiB, skipped
-client-side to save a doomed upload), or the server refused it — operators often
-set `--max_blob_size` around 10 MiB, which Gradle outputs routinely exceed.
+client-side to save a doomed upload), or the server refused it for size or space
+(HTTP `413`/`507`, gRPC `RESOURCE_EXHAUSTED` on a write) — operators often set
+`--max_blob_size` around 10 MiB, which Gradle outputs routinely exceed.
 
 Skips are not errors and never disable caching for other tasks.
 

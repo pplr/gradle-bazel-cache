@@ -1,5 +1,6 @@
 package io.github.pplr.bazelcache.internal
 
+import build.bazel.remote.execution.v2.Digest
 import io.github.pplr.bazelcache.client.CacheDisabledException
 import io.github.pplr.bazelcache.client.CacheIoException
 import io.github.pplr.bazelcache.client.CacheKeyMapper
@@ -117,16 +118,19 @@ internal class BazelBuildCacheService(
                     return
                 }
 
+                val actionDigest = mapper.actionKeyFor(key.hashCode)
+                val missing = missingBlobs(entry.digest, actionDigest)
+
                 // CAS before AC, always: no server checks dependencies on write,
                 // so an AC entry published first names a blob that is not there.
-                if (knownPresent.add(entry.digest.hash)) {
+                if (entry.digest.hash in missing && knownPresent.add(entry.digest.hash)) {
                     client.writeBlob(entry.digest) { entry.open() }
                     stats.bytesUp.addAndGet(entry.digest.sizeBytes)
                 }
 
-                uploadActionBestEffort(key.hashCode)
+                uploadActionBestEffort(key.hashCode, missing)
 
-                client.updateActionResult(mapper.actionKeyFor(key.hashCode), mapper.actionResultFor(entry.digest))
+                client.updateActionResult(actionDigest, mapper.actionResultFor(entry.digest))
                 stats.stores.incrementAndGet()
             }
         } catch (e: InterruptedException) {
@@ -151,6 +155,23 @@ internal class BazelBuildCacheService(
     }
 
     /**
+     * Hashes of the blobs this store must upload: one `FindMissingBlobs` for the
+     * entry, the `Command` and the `Action`, as Bazel queries before uploading.
+     * Blobs already uploaded in this build are not asked about again. Over HTTP,
+     * which has no such query, everything not yet uploaded is missing.
+     */
+    private fun missingBlobs(entry: Digest, action: Digest): Set<String> {
+        val candidates = listOf(entry, mapper.commandDigest, action)
+            .filter { it.hash !in knownPresent }
+            .distinctBy { it.hash }
+        if (candidates.isEmpty()) return emptySet()
+        val missing = client.findMissingBlobs(candidates).mapTo(HashSet()) { it.hash }
+        // The server holds the rest; remember that so later stores skip them.
+        candidates.forEach { if (it.hash !in missing) knownPresent.add(it.hash) }
+        return missing
+    }
+
+    /**
      * Publishes the synthetic `Command` and `Action` that the `ActionResult`
      * claims to describe.
      *
@@ -159,14 +180,14 @@ internal class BazelBuildCacheService(
      * target verifies their presence. A failure here must not cost the store --
      * the entry blob and AC write alone produce a working cache entry.
      */
-    private fun uploadActionBestEffort(gradleKey: String) {
+    private fun uploadActionBestEffort(gradleKey: String, missing: Set<String>) {
         try {
-            if (knownPresent.add(mapper.commandDigest.hash)) {
+            if (mapper.commandDigest.hash in missing && knownPresent.add(mapper.commandDigest.hash)) {
                 client.writeBlob(mapper.commandDigest) { mapper.commandBytes.inputStream() }
             }
             val actionBytes = mapper.actionBytesFor(gradleKey)
             val actionDigest = mapper.actionKeyFor(gradleKey)
-            if (knownPresent.add(actionDigest.hash)) {
+            if (actionDigest.hash in missing && knownPresent.add(actionDigest.hash)) {
                 client.writeBlob(actionDigest) { actionBytes.inputStream() }
             }
         } catch (e: InterruptedException) {

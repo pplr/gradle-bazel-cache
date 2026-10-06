@@ -64,9 +64,12 @@ jobs:
           done
           curl -sf http://127.0.0.1:9090/status
 
+      # Both transports against the same server, which also proves an entry
+      # stored over one loads over the other.
       - name: Run protocol tests against the real server
         env:
           BAZEL_REMOTE_HTTP_URL: http://127.0.0.1:9090/
+          BAZEL_REMOTE_GRPC_URL: grpc://127.0.0.1:9092
         run: ./gradlew :cache-client:integrationTest --stacktrace
 
       - name: Quickstart must reach FROM-CACHE
@@ -77,6 +80,17 @@ jobs:
           ../../gradlew :app:compileJava --build-cache | tee out.txt
           # The whole point of the example. Fail loudly if it regresses.
           grep -q 'FROM-CACHE' out.txt || { echo "::error::quickstart did not hit the cache"; exit 1; }
+
+      - name: Quickstart must reach FROM-CACHE over gRPC
+        working-directory: examples/quickstart
+        run: |
+          # A fresh salt so this run cannot hit what the HTTP step stored.
+          echo "// grpc $GITHUB_RUN_ID" >> app/src/main/java/demo/Demo.java
+          rm -rf app/build .gradle
+          ../../gradlew :app:compileJava --build-cache -PbazelCache.url=grpc://127.0.0.1:9092
+          rm -rf app/build .gradle
+          ../../gradlew :app:compileJava --build-cache -PbazelCache.url=grpc://127.0.0.1:9092 | tee out.txt
+          grep -q 'FROM-CACHE' out.txt || { echo "::error::gRPC quickstart did not hit the cache"; exit 1; }
 
       - name: Server logs
         if: always()
@@ -119,8 +133,9 @@ jobs:
 
       - name: The published POM must declare no dependencies
         run: |
-          # protobuf is shaded into the jar. If it appears here, consumers would
-          # resolve it transitively and fight other plugins for the version.
+          # protobuf and the gRPC stack are shaded into the jar. If they appear
+          # here, consumers would resolve them transitively and fight other
+          # plugins for the version.
           POM=$(find gradle-plugin/build/staging-repo -name 'gradle-bazel-cache-*.pom' | head -1)
           test -n "$POM" || { echo "::error::no implementation POM was produced"; exit 1; }
           echo "checking $POM"
