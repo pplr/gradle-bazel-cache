@@ -55,6 +55,24 @@ Inspect what was written:
 curl -s http://127.0.0.1:9090/status | jq '{NumFiles, CurrSize}'
 ```
 
+## Over gRPC
+
+The same server speaks the Remote Execution API on port 9092 — the port Bazel
+itself would use. Point the plugin at it and repeat:
+
+```bash
+rm -rf app/build .gradle
+../../gradlew :app:compileJava --build-cache -PbazelCache.url=grpc://127.0.0.1:9092
+```
+
+```
+> Task :app:compileJava FROM-CACHE
+```
+
+A hit on the first try: the entry stored over HTTP above is the same entry over
+gRPC. Only the transport differs — `ActionCache.GetActionResult` and
+`ByteStream.Read` instead of `GET /ac/` and `GET /cas/`.
+
 ## Clean up
 
 ```bash
@@ -67,6 +85,7 @@ podman compose down -v
 ../../gradlew :app:compileJava --build-cache -PbazelCache.url=https://cache.example.com
 ```
 
-If it needs a token, set `tokenEnvironmentVariable` in `settings.gradle.kts` and
+`grpc://` and `grpcs://` URLs select gRPC, as in Bazel's `--remote_cache`. If it
+needs a token, set `tokenEnvironmentVariable` in `settings.gradle.kts` and
 export that variable. The plugin stores the variable *name*, never the value, so
 no secret reaches Gradle's configuration cache on disk.

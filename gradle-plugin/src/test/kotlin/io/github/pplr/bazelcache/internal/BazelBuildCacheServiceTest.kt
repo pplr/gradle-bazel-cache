@@ -3,6 +3,9 @@ package io.github.pplr.bazelcache.internal
 import io.github.pplr.bazelcache.client.CacheEndpoint
 import io.github.pplr.bazelcache.client.CacheKeyMapper
 import io.github.pplr.bazelcache.client.Digests
+import io.github.pplr.bazelcache.client.grpc.FakeGrpcCacheServer
+import io.github.pplr.bazelcache.client.grpc.GrpcEndpoint
+import io.github.pplr.bazelcache.client.grpc.GrpcRemoteCacheClient
 import io.github.pplr.bazelcache.client.http.FakeBazelCacheServer
 import io.github.pplr.bazelcache.client.http.HttpRemoteCacheClient
 import org.assertj.core.api.Assertions.assertThat
@@ -42,7 +45,19 @@ class BazelBuildCacheServiceTest {
         strict = strict,
     )
 
-    @BeforeEach fun setUp() = server.reset()
+    private fun grpcService() = BazelBuildCacheService(
+        client = GrpcRemoteCacheClient(GrpcEndpoint(grpcServer.target)),
+        mapper = CacheKeyMapper("v1"),
+        spoolDirectory = spool,
+        maxEntrySizeBytes = Long.MAX_VALUE,
+        inMemoryLimitBytes = 8L * 1024 * 1024,
+        strict = false,
+    )
+
+    @BeforeEach fun setUp() {
+        server.reset()
+        grpcServer.reset()
+    }
 
     @ParameterizedTest(name = "streaming={0} inMemoryLimit={1}")
     @CsvSource("true, 8388608", "false, 8388608", "false, 0")
@@ -202,6 +217,54 @@ class BazelBuildCacheServiceTest {
         }
     }
 
+    // --- gRPC ---------------------------------------------------------------
+
+    @Test
+    fun `store then load round-trips over gRPC`() {
+        val key = key("3748f79fa4230cfba17f559fee3220fb")
+        grpcService().use { svc ->
+            svc.store(key, writer(payload))
+            val sink = ByteArrayOutputStream()
+            assertThat(svc.load(key, reader(sink))).isTrue()
+            assertThat(sink.toByteArray()).isEqualTo(payload)
+            assertThat(svc.statsForTesting().errors.get()).isZero()
+        }
+        val mapper = CacheKeyMapper("v1")
+        assertThat(grpcServer.cas).containsKeys(
+            Digests.digestOf(payload).hash,
+            mapper.commandDigest.hash,
+            mapper.actionKeyFor(key.hashCode).hash,
+        )
+    }
+
+    @Test
+    fun `a store asks FindMissingBlobs once and uploads only what is missing`() {
+        val first = key("3748f79fa4230cfba17f559fee3220fb")
+        val second = key("0".repeat(32))
+        grpcService().use { it.store(first, writer(payload)) }
+        assertThat(grpcServer.count("FindMissingBlobs")).isEqualTo(1)
+        assertThat(grpcServer.count("Write")).isEqualTo(3) // entry, Command, Action
+
+        // A new build storing the same output under another key: the entry and
+        // the Command are already there, so only the new Action is uploaded.
+        grpcServer.calls.clear()
+        grpcService().use { it.store(second, writer(payload)) }
+        assertThat(grpcServer.count("FindMissingBlobs")).isEqualTo(1)
+        assertThat(grpcServer.count("Write")).isEqualTo(1)
+        assertThat(grpcServer.count("UpdateActionResult")).isEqualTo(1)
+    }
+
+    @Test
+    fun `gRPC failures never escape load or store`() {
+        val key = key("3748f79fa4230cfba17f559fee3220fb")
+        grpcServer.forceStatus = io.grpc.Status.UNAVAILABLE
+        grpcService().use { svc ->
+            svc.store(key, writer(payload))
+            assertThat(svc.load(key, reader(ByteArrayOutputStream()))).isFalse()
+            assertThat(svc.statsForTesting().errors.get()).isGreaterThan(0)
+        }
+    }
+
     private fun key(hash: String) = object : BuildCacheKey {
         override fun getHashCode() = hash
         override fun toByteArray() = hash.toByteArray()
@@ -232,7 +295,11 @@ class BazelBuildCacheServiceTest {
 
     companion object {
         private val server = FakeBazelCacheServer()
+        private val grpcServer = FakeGrpcCacheServer()
 
-        @JvmStatic @AfterAll fun stop() = server.close()
+        @JvmStatic @AfterAll fun stop() {
+            server.close()
+            grpcServer.close()
+        }
     }
 }

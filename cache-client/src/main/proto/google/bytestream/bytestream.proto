@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Vendored SUBSET of the Google ByteStream API, which REAPI uses to move CAS
+// blobs over gRPC.
+// Source: https://github.com/googleapis/googleapis
+//         google/bytestream/bytestream.proto
+// Copyright Google LLC. Licensed under the Apache License, Version 2.0.
+//
+// Trimmed to the four messages a cache client needs; the google/api
+// annotations and the QueryWriteStatus messages are omitted. Field numbers are
+// transcribed verbatim from upstream and checked by
+// tools/verify-proto-field-numbers.sh.
+//
+// The Java package is upstream's. Like build.bazel.remote.*, it must NOT be
+// relocated when shading: see gradle-plugin/build.gradle.kts.
+
+syntax = "proto3";
+
+package google.bytestream;
+
+option java_package = "com.google.bytestream";
+option java_outer_classname = "ByteStreamProto";
+
+// Upstream field numbers: resource_name = 1, read_offset = 2, read_limit = 3.
+message ReadRequest {
+  string resource_name = 1;
+  int64 read_offset = 2;
+  int64 read_limit = 3;
+}
+
+// Upstream field number: data = 10.
+message ReadResponse {
+  bytes data = 10;
+}
+
+// Upstream field numbers: resource_name = 1, write_offset = 2,
+// finish_write = 3, data = 10.
+message WriteRequest {
+  string resource_name = 1;
+  int64 write_offset = 2;
+  bool finish_write = 3;
+  bytes data = 10;
+}
+
+// Upstream field number: committed_size = 1.
+message WriteResponse {
+  int64 committed_size = 1;
+}

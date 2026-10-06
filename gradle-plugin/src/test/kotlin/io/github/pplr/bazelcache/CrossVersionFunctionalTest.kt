@@ -1,5 +1,6 @@
 package io.github.pplr.bazelcache
 
+import io.github.pplr.bazelcache.client.grpc.FakeGrpcCacheServer
 import io.github.pplr.bazelcache.client.http.FakeBazelCacheServer
 import org.assertj.core.api.Assertions.assertThat
 import org.gradle.testkit.runner.GradleRunner
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.io.TempDir
 import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import java.io.File
 import java.util.UUID
@@ -22,6 +24,9 @@ import java.util.UUID
  * that an older Gradle cannot satisfy. A `NoSuchMethodError` on Gradle 8.0
  * would surface here and nowhere else.
  *
+ * Both transports run on every version: the gRPC stack carries okio, which is
+ * Kotlin, and must run against the oldest stdlib Gradle hands us.
+ *
  * Tagged: each version downloads a full distribution and starts its own daemon,
  * so this is kept out of `./gradlew build`.
  *
@@ -32,11 +37,11 @@ class CrossVersionFunctionalTest {
 
     @TempDir lateinit var projectDir: File
 
-    @ParameterizedTest(name = "Gradle {0}")
+    @ParameterizedTest(name = "Gradle {0} over {1}")
     @MethodSource("gradleVersions")
-    fun `plugin loads and serves a cache hit`(gradleVersion: String) {
+    fun `plugin loads and serves a cache hit`(gradleVersion: String, transport: String) {
         val salt = UUID.randomUUID().toString()
-        writeProject(salt)
+        writeProject(salt, if (transport == "grpc") grpcServer.target else server.baseUrl)
 
         val first = run(gradleVersion)
         assertThat(first.task(":cacheMe")!!.outcome).isEqualTo(TaskOutcome.SUCCESS)
@@ -59,7 +64,7 @@ class CrossVersionFunctionalTest {
         .forwardOutput()
         .build()
 
-    private fun writeProject(salt: String) {
+    private fun writeProject(salt: String, endpoint: String) {
         File(projectDir, "settings.gradle.kts").writeText(
             """
             import io.github.pplr.bazelcache.BazelRemoteBuildCache
@@ -71,7 +76,7 @@ class CrossVersionFunctionalTest {
             buildCache {
                 local { isEnabled = false }
                 remote(BazelRemoteBuildCache::class) {
-                    endpoint = "${server.baseUrl}"
+                    endpoint = "$endpoint"
                     isPush = true
                 }
             }
@@ -97,12 +102,17 @@ class CrossVersionFunctionalTest {
 
     companion object {
         private val server = FakeBazelCacheServer()
+        private val grpcServer = FakeGrpcCacheServer()
 
         /** Overridable so CI can shard the matrix across jobs. */
         @JvmStatic
-        fun gradleVersions(): List<String> =
+        fun gradleVersions(): List<Arguments> =
             (System.getProperty("gradleVersions") ?: "8.0,8.14.5,9.8.0").split(",")
+                .flatMap { version -> listOf("http", "grpc").map { Arguments.of(version, it) } }
 
-        @JvmStatic @AfterAll fun stop() = server.close()
+        @JvmStatic @AfterAll fun stop() {
+            server.close()
+            grpcServer.close()
+        }
     }
 }

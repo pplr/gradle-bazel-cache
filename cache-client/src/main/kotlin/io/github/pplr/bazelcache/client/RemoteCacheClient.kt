@@ -8,7 +8,8 @@ import java.io.OutputStream
 
 /**
  * Transport-agnostic view of a Bazel remote cache, narrowed to what a build
- * cache needs. The HTTP implementation ships in 1.0; a gRPC (REAPI) one follows.
+ * cache needs. Implemented over HTTP (Bazel's `/ac/` `/cas/` protocol) and over
+ * gRPC (REAPI).
  *
  * ## Contract
  *
@@ -37,6 +38,21 @@ interface RemoteCacheClient : Closeable {
      * and must read as a miss.
      */
     fun readBlob(digest: Digest, sink: OutputStream): Boolean
+
+    /**
+     * True if [findMissingBlobs] asks the server. False for HTTP, which has no
+     * such query, so wrappers can tell a local answer from a network round trip.
+     */
+    val queriesMissingBlobs: Boolean get() = false
+
+    /**
+     * The subset of [digests] the server does not hold.
+     *
+     * Lets a store skip uploads the server already has. A transport without
+     * such a query reports every digest as missing, exactly as Bazel's HTTP
+     * cache client does.
+     */
+    fun findMissingBlobs(digests: Collection<Digest>): Set<Digest> = digests.toSet()
 
     /**
      * Uploads a blob whose content and digest are already known.

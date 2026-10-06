@@ -1,9 +1,15 @@
 package io.github.pplr.bazelcache
 
+import io.github.pplr.bazelcache.client.grpc.FakeGrpcCacheServer
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.OutputStream
+import java.lang.reflect.Proxy
 import java.net.URLClassLoader
 import java.util.jar.JarFile
 
@@ -40,6 +46,36 @@ class ShadedJarContentTest {
             .isEmpty()
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["io/grpc/", "com/google/common/", "com/google/gson/", "okio/", "io/perfmark/"])
+    fun `gRPC and its dependencies are not present under their own packages`(prefix: String) {
+        assertThat(entries.filter { it.startsWith(prefix) && it.endsWith(".class") })
+            .describedAs("unrelocated $prefix classes in the published jar")
+            .isEmpty()
+    }
+
+    @Test
+    fun `gRPC service files are renamed and point at relocated classes`() {
+        val services = entries.filter { it.startsWith("META-INF/services/") && !it.endsWith("/") }
+        val shaded = shadedPrefix.replace('.', '/')
+        assertThat(services).isNotEmpty().allMatch { it.startsWith("META-INF/services/$shadedPrefix.") }
+        JarFile(jar).use { j ->
+            services.forEach { name ->
+                val impls = j.getInputStream(j.getEntry(name)).bufferedReader().readLines().filter(String::isNotBlank)
+                impls.forEach { impl ->
+                    assertThat(entries).describedAs("provider named in $name").contains(
+                        "$shaded/${impl.removePrefix("$shadedPrefix.").replace('.', '/')}.class",
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `no Maven metadata for bundled libraries`() {
+        assertThat(entries.filter { it.startsWith("META-INF/maven/") }).isEmpty()
+    }
+
     @Test
     fun `protobuf is present under the shaded package`() {
         val shadedPath = shadedPrefix.replace('.', '/') + "/protobuf/"
@@ -55,6 +91,8 @@ class ShadedJarContentTest {
         // length-prefixed -- corrupting the descriptor pool at class init.
         assertThat(entries).contains("build/bazel/remote/execution/v2/ActionResult.class")
         assertThat(entries.none { it.startsWith(shadedPrefix.replace('.', '/') + "/bazel/") }).isTrue()
+        // Same for the ByteStream stubs, which share com.google with relocated libraries.
+        assertThat(entries).contains("com/google/bytestream/ByteStreamProto\$ReadRequest.class")
     }
 
     @Test
@@ -110,6 +148,64 @@ class ShadedJarContentTest {
 
             // And the protobuf runtime backing it really is the relocated one.
             assertThat(descriptor.javaClass.name).startsWith("$shadedPrefix.protobuf")
+        }
+    }
+
+    @Test
+    fun `ByteStream descriptors initialise from the shaded jar`() {
+        URLClassLoader(arrayOf(jar.toURI().toURL()), ClassLoader.getPlatformClassLoader()).use { cl ->
+            val readRequest = cl.loadClass("com.google.bytestream.ByteStreamProto\$ReadRequest")
+            val descriptor = readRequest.getMethod("getDescriptor").invoke(null)
+            val fullName = descriptor.javaClass.getMethod("getFullName").invoke(descriptor) as String
+            assertThat(fullName).isEqualTo("google.bytestream.ReadRequest")
+        }
+    }
+
+    /**
+     * The gRPC stack out of the shaded jar, against a real server: channel
+     * construction, the relocated ServiceLoader providers, the hand-written
+     * method descriptors and ByteStream in both directions. Relocation faults
+     * here are runtime-only -- a missing provider is "no name resolver found"
+     * in somebody else's build -- so nothing short of a round trip proves it.
+     */
+    @Test
+    fun `a gRPC round trip works entirely inside the shaded jar`() {
+        val stdlib = File(Unit::class.java.protectionDomain.codeSource.location.toURI())
+        FakeGrpcCacheServer().use { server ->
+            URLClassLoader(
+                arrayOf(jar.toURI().toURL(), stdlib.toURI().toURL()),
+                ClassLoader.getPlatformClassLoader(),
+            ).use { cl ->
+                val endpoint = cl.loadClass("io.github.pplr.bazelcache.client.grpc.GrpcEndpoint")
+                    .getConstructor(String::class.java).newInstance(server.target)
+                val clientClass = cl.loadClass("io.github.pplr.bazelcache.client.grpc.GrpcRemoteCacheClient")
+                val client = clientClass.constructors
+                    .single { it.parameterCount == 4 && it.parameterTypes[0] == endpoint.javaClass }
+                    .newInstance(endpoint, "", emptyMap<String, String>(), java.time.Duration.ofSeconds(10))
+                try {
+                    assertThat(clientClass.getMethod("probe").invoke(client)).isEqualTo(true)
+
+                    val payload = "shaded round trip".toByteArray()
+                    val digests = cl.loadClass("io.github.pplr.bazelcache.client.Digests")
+                    val digest = digests.getMethod("digestOf", ByteArray::class.java)
+                        .invoke(digests.getField("INSTANCE").get(null), payload)
+                    // writeBlob takes a Kotlin () -> InputStream from the isolated
+                    // loader's stdlib, so the lambda has to be built in that loader.
+                    val function0 = cl.loadClass("kotlin.jvm.functions.Function0")
+                    val source = Proxy.newProxyInstance(cl, arrayOf(function0)) { _, method, _ ->
+                        if (method.name == "invoke") payload.inputStream() else null
+                    }
+                    clientClass.getMethod("writeBlob", digest.javaClass, function0).invoke(client, digest, source)
+
+                    val sink = ByteArrayOutputStream()
+                    val read = clientClass.getMethod("readBlob", digest.javaClass, OutputStream::class.java)
+                        .invoke(client, digest, sink)
+                    assertThat(read).isEqualTo(true)
+                    assertThat(sink.toByteArray()).isEqualTo(payload)
+                } finally {
+                    clientClass.getMethod("close").invoke(client)
+                }
+            }
         }
     }
 

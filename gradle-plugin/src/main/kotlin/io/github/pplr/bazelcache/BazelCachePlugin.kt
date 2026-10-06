@@ -1,5 +1,6 @@
 package io.github.pplr.bazelcache
 
+import io.github.pplr.bazelcache.client.grpc.GrpcEndpoint
 import org.gradle.api.Plugin
 import org.gradle.api.initialization.Settings
 import org.gradle.api.logging.Logging
@@ -13,7 +14,7 @@ import org.gradle.api.logging.Logging
  *
  * buildCache {
  *     remote(BazelRemoteBuildCache::class) {
- *         endpoint = "https://cache.internal:8080"
+ *         endpoint = "https://cache.internal:8080"   // or "grpcs://cache.internal:1985"
  *         isPush = System.getenv("CI") != null
  *     }
  * }
@@ -31,9 +32,11 @@ class BazelCachePlugin : Plugin<Settings> {
         // print the warning twice. This runs once per configuration.
         settings.gradle.settingsEvaluated { evaluated ->
             val remote = evaluated.buildCache.remote as? BazelRemoteBuildCache ?: return@settingsEvaluated
-            if (remote.instanceName.isNotBlank()) {
+            val http = remote.endpoint?.let { !GrpcEndpoint.isGrpc(it) } ?: false
+            if (http && remote.instanceName.isNotBlank()) {
                 // Bazel ignores --remote_instance_name for HTTP caches too. We match
-                // that, but say so rather than silently dropping a value.
+                // that, but say so rather than silently dropping a value. Over gRPC
+                // it is sent, so there is nothing to warn about.
                 Logging.getLogger(BazelCachePlugin::class.java).warn(
                     "bazel-cache: instanceName has no effect over HTTP (as in Bazel). " +
                         "To use a path prefix, put it in endpoint, e.g. https://cache.example.com/team-a/",

@@ -12,6 +12,8 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class RecordingRemoteCacheClient(
     /** Returns the exception to throw for a given 1-based attempt, or null to succeed. */
+    /** False to behave like HTTP: a local answer that never reaches the network. */
+    override val queriesMissingBlobs: Boolean = true,
     private val failure: (attempt: Int) -> Throwable? = { null },
 ) : RemoteCacheClient {
 
@@ -32,6 +34,9 @@ class RecordingRemoteCacheClient(
     }
 
     override fun readBlob(digest: Digest, sink: OutputStream): Boolean = attempt(false)
+
+    override fun findMissingBlobs(digests: Collection<Digest>): Set<Digest> =
+        if (queriesMissingBlobs) attempt(digests.toSet()) else digests.toSet()
 
     override fun writeBlob(digest: Digest, source: () -> InputStream) {
         attempt(Unit)

@@ -21,7 +21,7 @@ content. At load time Gradle hands you a cache key but not the content, so the C
 address cannot be recomputed. Bridging the two requires an AC indirection.
 
 This plugin implements that bridge against the **unmodified** REAPI protocol — no server
-flags, no proprietary extensions.
+flags, no proprietary extensions — over Bazel's HTTP cache protocol or over gRPC.
 
 ## Prior art, and the gap
 
@@ -63,9 +63,20 @@ buildCache {
 }
 ```
 
-`instanceName` has the same meaning as Bazel's `--remote_instance_name`, and — like
-Bazel — no effect over HTTP. For an HTTP path prefix, put it in the endpoint, as you
-would in Bazel's `--remote_cache`: `endpoint = "https://cache.example.com/team-a/"`.
+`endpoint` is spelled as Bazel's `--remote_cache`, and the scheme picks the transport:
+`http://` / `https://` for the HTTP cache protocol, `grpc://` / `grpcs://` for the
+Remote Execution API over gRPC (plaintext / TLS). As in Bazel, an endpoint with no
+scheme is gRPC over TLS.
+
+```kotlin
+endpoint = "grpcs://cache.internal:1985"
+instanceName = "team-a"                    // optional
+```
+
+`instanceName` has the same meaning as Bazel's `--remote_instance_name`: sent over
+gRPC and — like Bazel — no effect over HTTP. For an HTTP path prefix, put it in the
+endpoint, as you would in Bazel's `--remote_cache`:
+`endpoint = "https://cache.example.com/team-a/"`.
 
 Credentials are referenced **by environment variable name**, never by value, so no secret
 is written into Gradle's configuration cache entry on disk:
@@ -74,13 +85,15 @@ is written into Gradle's configuration cache entry on disk:
 tokenEnvironmentVariable = "BAZEL_CACHE_TOKEN"   // default
 ```
 
+The token is sent as `Authorization: Bearer …` — an HTTP header, or gRPC metadata.
+
 ## Server support
 
-| Server | 1.0 (HTTP) | 1.1 (gRPC) |
+| Server | HTTP | gRPC |
 |---|---|---|
-| `bazel-remote` | ✅ verified against v2.6.2 | planned |
+| `bazel-remote` | ✅ verified against v2.6.2 | ✅ verified against v2.6.2 |
 | nginx + WebDAV, S3 / GCS / MinIO, Artifactory | expected, untested | — |
-| Buildbarn, BuildBuddy, NativeLink, EngFlow | ❌ gRPC-only | planned |
+| Buildbarn, BuildBuddy, NativeLink, EngFlow | — (gRPC-only) | expected, untested |
 
 Verified means the integration suite runs against a real server with **AC
 validation enabled** — its default. No server flags are required.
@@ -89,7 +102,8 @@ Details in [docs/SERVER-MATRIX.md](docs/SERVER-MATRIX.md).
 ## Roadmap
 
 - **1.0** — HTTP `/ac/` `/cas/`, resilience layer, quickstart, Plugin Portal + Maven Central
-- **1.1** — gRPC REAPI (`grpc-okhttp`), `FindMissingBlobs`, Buildbarn / BuildBuddy interop
+- **1.1** — gRPC REAPI (`grpc-okhttp`), `FindMissingBlobs`
+- **Next** — Buildbarn / BuildBuddy interop in CI, custom CA and client certificates
 
 ## Building
 
@@ -125,4 +139,6 @@ Maven Central is an optional mirror; see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE). Vendored `.proto` files are Apache-2.0; see [NOTICE](NOTICE).
+MIT — see [LICENSE](LICENSE). Vendored `.proto` files and the bundled (relocated)
+gRPC, Guava, gson, okio and perfmark libraries are Apache-2.0, protobuf is BSD-3-Clause;
+see [NOTICE](NOTICE).

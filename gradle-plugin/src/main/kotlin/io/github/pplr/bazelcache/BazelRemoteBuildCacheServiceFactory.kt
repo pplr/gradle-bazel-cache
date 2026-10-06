@@ -1,7 +1,12 @@
 package io.github.pplr.bazelcache
 
+import build.bazel.remote.execution.v2.DigestFunction
 import io.github.pplr.bazelcache.client.CacheEndpoint
+import io.github.pplr.bazelcache.client.CacheIoException
 import io.github.pplr.bazelcache.client.CacheKeyMapper
+import io.github.pplr.bazelcache.client.RemoteCacheClient
+import io.github.pplr.bazelcache.client.grpc.GrpcEndpoint
+import io.github.pplr.bazelcache.client.grpc.GrpcRemoteCacheClient
 import io.github.pplr.bazelcache.client.http.HttpRemoteCacheClient
 import io.github.pplr.bazelcache.client.resilience.ResilientRemoteCacheClient
 import io.github.pplr.bazelcache.internal.BazelBuildCacheService
@@ -35,18 +40,30 @@ class BazelRemoteBuildCacheServiceFactory : BuildCacheServiceFactory<BazelRemote
         configuration: BazelRemoteBuildCache,
         describer: BuildCacheServiceFactory.Describer,
     ): BuildCacheService {
+        val grpc = configuration.endpoint?.let(GrpcEndpoint::isGrpc) ?: false
         describer
             .type("bazel")
             .config("endpoint", describeEndpoint(configuration.endpoint))
+            .config("transport", if (grpc) "grpc" else "http")
             .config("keyVersion", configuration.keyVersion)
+        if (grpc && configuration.instanceName.isNotEmpty()) {
+            describer.config("instanceName", configuration.instanceName)
+        }
 
         // Misconfiguration: fail loudly, with a message that says what to fix.
-        val endpoint = try {
-            CacheEndpoint(
-                requireNotNull(configuration.endpoint) {
-                    "bazel-cache: 'endpoint' is required, e.g. endpoint = \"https://cache.example.com\""
-                },
-            )
+        val client: RemoteCacheClient = try {
+            val endpoint = requireNotNull(configuration.endpoint) {
+                "'endpoint' is required, e.g. endpoint = \"https://cache.example.com\""
+            }
+            if (grpc) {
+                GrpcRemoteCacheClient(
+                    GrpcEndpoint(endpoint),
+                    instanceName = configuration.instanceName,
+                    headers = resolveHeaders(configuration),
+                )
+            } else {
+                HttpRemoteCacheClient(CacheEndpoint(endpoint), headers = resolveHeaders(configuration))
+            }
         } catch (e: IllegalArgumentException) {
             throw InvalidUserDataException("bazel-cache: ${e.message}", e)
         }
@@ -54,15 +71,14 @@ class BazelRemoteBuildCacheServiceFactory : BuildCacheServiceFactory<BazelRemote
         val spool = resolveSpoolDirectory(configuration)
         sweepStaleSpoolFiles(spool, logger)
 
-        val client = HttpRemoteCacheClient(endpoint, headers = resolveHeaders(configuration))
-
         // One cheap reachability check. Without it a typo in the endpoint turns
         // into one doomed request per task, which is slower than no cache at all.
-        if (!client.probe()) {
-            logger.warn(
-                "bazel-cache: {} is not reachable; builds will run without the remote cache.",
-                describeEndpoint(configuration.endpoint),
-            )
+        val usable = if (client is GrpcRemoteCacheClient) {
+            checkCapabilities(client, configuration)
+        } else {
+            client.probe().also { reachable -> if (!reachable) warnUnreachable(configuration) }
+        }
+        if (!usable) {
             client.close()
             return NoOpBuildCacheService
         }
@@ -76,6 +92,51 @@ class BazelRemoteBuildCacheServiceFactory : BuildCacheServiceFactory<BazelRemote
             maxEntrySizeBytes = configuration.maxEntrySizeBytes,
             inMemoryLimitBytes = configuration.inMemoryLimitBytes,
             strict = configuration.strict,
+        )
+    }
+
+    /**
+     * The gRPC startup check, as Bazel runs it: `GetCapabilities` doubles as the
+     * reachability probe, then the server must accept SHA-256 -- the only digest
+     * function our keyspace and the HTTP protocol use.
+     *
+     * Bazel fails the build on an unsupported digest function. Here it is a
+     * server-side fact, not something the build script can fix, so it degrades
+     * like an unreachable server instead. A server that refuses action results
+     * only earns Bazel's warning: Bazel keeps trying, and so do we.
+     */
+    private fun checkCapabilities(client: GrpcRemoteCacheClient, configuration: BazelRemoteBuildCache): Boolean {
+        val capabilities = try {
+            client.getCapabilities(GrpcRemoteCacheClient.PROBE_TIMEOUT)
+        } catch (_: CacheIoException) {
+            warnUnreachable(configuration)
+            return false
+        } ?: return true // answered, but without capabilities: e.g. a credential problem, reported later
+
+        val cache = capabilities.cacheCapabilities
+        if (DigestFunction.Value.SHA256 !in cache.digestFunctionsList) {
+            logger.warn(
+                "bazel-cache: {} does not support SHA256 (supported: {}); " +
+                    "builds will run without the remote cache.",
+                describeEndpoint(configuration.endpoint),
+                cache.digestFunctionsList,
+            )
+            return false
+        }
+        if (configuration.isPush && !cache.actionCacheUpdateCapabilities.updateEnabled) {
+            // Bazel's wording for --remote_upload_local_results.
+            logger.warn(
+                "bazel-cache: push is enabled, but the remote cache does not support uploading action " +
+                    "results or the current account is not authorized to write local results to the remote cache.",
+            )
+        }
+        return true
+    }
+
+    private fun warnUnreachable(configuration: BazelRemoteBuildCache) {
+        logger.warn(
+            "bazel-cache: {} is not reachable; builds will run without the remote cache.",
+            describeEndpoint(configuration.endpoint),
         )
     }
 
