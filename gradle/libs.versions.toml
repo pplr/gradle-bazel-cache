@@ -1,6 +1,6 @@
 [versions]
 # Kotlin compiler used to build this project.
-kotlin = "2.4.20"
+kotlin = "2.4.21"
 # Language/API level we are allowed to emit against. This MUST NOT exceed the
 # Kotlin stdlib embedded in the OLDEST Gradle we support, because Gradle supplies
 # the stdlib to plugin classloaders and we deliberately do not bundle it.
