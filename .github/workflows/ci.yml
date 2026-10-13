@@ -45,7 +45,7 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
       - uses: gradle/actions/setup-gradle@v6
 
       # Started as a step rather than a `services:` entry because bazel-remote
@@ -110,7 +110,7 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '25'
       - uses: gradle/actions/setup-gradle@v6
       # The only real enforcement of the supported-version claim: we compile
       # against the wrapper's Gradle API, so nothing at compile time stops us
@@ -125,7 +125,7 @@ jobs:
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
       - uses: gradle/actions/setup-gradle@v6
 
       - name: Build the Central bundle
